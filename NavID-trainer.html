@@ -1,0 +1,1453 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>NavID Trainer — identification VFR</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.css">
+<style>
+  :root{
+    --bg:#0b0f17;--panel:#121826;--panel2:#0e1320;--line:#1f2a3d;
+    --txt:#dfe6f0;--txt2:#8a97ad;--txt3:#5b687e;
+    --cyan:#36c5e0;--green:#3ad17a;--amber:#f0a020;--red:#ef5350;--blue:#4a9eff;
+    --magenta:#d0006f;                 /* symbole carte : cercle d'incertitude */
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Roboto Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --h-top:52px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;
+    overflow:hidden;-webkit-text-size-adjust:100%;
+  }
+  .mono{font-family:var(--mono)}
+
+  /* ---------- contrôles ---------- */
+  .btn{
+    font-family:inherit;font-size:13px;color:var(--txt);background:#1a2336;
+    border:1px solid var(--line);border-radius:6px;padding:7px 12px;cursor:pointer;transition:.12s;
+  }
+  .btn:hover{background:#22304a;border-color:#324663}
+  .btn:active{transform:scale(.97)}
+  .btn.primary{background:#13405c;border-color:#1d5e87;color:#dff3ff}
+  .btn.primary:hover{background:#185578}
+  .btn.sm{padding:4px 8px;font-size:12px}
+  .btn.on{border-color:var(--cyan);color:var(--cyan)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn:disabled:active{transform:none}
+  input,select{
+    font-family:inherit;font-size:13px;color:var(--txt);background:var(--panel2);
+    border:1px solid var(--line);border-radius:6px;padding:7px 9px;
+  }
+  input:focus,select:focus{outline:none;border-color:var(--cyan)}
+  input[type=checkbox]{width:auto;accent-color:var(--cyan)}
+  input[type=range]{accent-color:var(--cyan);padding:0;background:none;border:none}
+
+  /* ---------- barre supérieure ---------- */
+  #topbar{
+    height:var(--h-top);display:flex;align-items:center;gap:14px;padding:0 16px;
+    background:var(--panel);border-bottom:1px solid var(--line);
+  }
+  #brand{font-family:var(--mono);font-weight:600;letter-spacing:.06em;color:var(--cyan);font-size:15px;white-space:nowrap}
+  #brand span{color:var(--txt3);font-weight:400}
+  #chips{display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+  #chips::-webkit-scrollbar{display:none}
+  .chip{
+    display:flex;align-items:center;gap:7px;white-space:nowrap;background:var(--panel2);
+    border:1px solid var(--line);border-radius:6px;padding:5px 10px;
+  }
+  .chip i{font-style:normal;color:var(--txt2);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  .chip b{font-family:var(--mono);color:var(--cyan);font-weight:600;font-size:13px}
+
+  /* ---------- scène ---------- */
+  #stage{display:flex;height:calc(100% - var(--h-top));position:relative}
+  #pane3d{position:relative;flex:0 0 58%;min-width:220px;min-height:160px;background:#070a11}
+  #paneChart{position:relative;flex:1 1 auto;min-width:220px;min-height:160px;border-left:1px solid var(--line)}
+  #map3d,#mapChart{position:absolute;inset:0}
+  #splitter{flex:0 0 6px;background:var(--panel);cursor:col-resize;position:relative;z-index:5}
+  #splitter::after{content:"";position:absolute;inset:0;margin:auto;width:2px;height:34px;background:var(--line);border-radius:2px}
+  #splitter:hover::after{background:var(--cyan)}
+  @media (max-width:860px){
+    #stage{flex-direction:column}
+    #pane3d{flex:0 0 50%}
+    #paneChart{border-left:none;border-top:1px solid var(--line)}
+    #splitter{cursor:row-resize}
+    #splitter::after{width:34px;height:2px}
+  }
+
+  /* ---------- incrustations ---------- */
+  .ov{position:absolute;z-index:3;pointer-events:none}
+  .ov.i{pointer-events:auto}
+  .card{
+    background:rgba(18,24,38,.88);backdrop-filter:blur(6px);
+    border:1px solid var(--line);border-radius:10px;padding:9px 12px;
+  }
+  #lookInfo{top:10px;left:10px}
+  #lookInfo .big{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--cyan)}
+  #lookInfo .sub{color:var(--txt2);font-size:11.5px;margin-top:3px;font-family:var(--mono)}
+  #hint3d{top:10px;right:10px;max-width:196px;color:var(--txt3);font-size:11px;line-height:1.5}
+  #hint3d b{color:var(--txt2)}
+  #rose{bottom:12px;left:12px;width:104px;height:104px;cursor:pointer}
+  #rose:hover #roseHalo{stroke:var(--cyan);stroke-width:1.6}
+
+  #altBtns{bottom:12px;left:126px;display:flex;gap:5px;flex-wrap:wrap;max-width:260px}
+  /* Même signal d'affordance que la rose : liseré et texte cyan au survol. */
+  #btnAlt{
+    display:flex;align-items:center;gap:7px;padding:6px 11px;font-size:12px;
+    background:rgba(18,24,38,.88);backdrop-filter:blur(6px);
+  }
+  #btnAlt b{font-family:var(--mono);color:var(--cyan);font-weight:600}
+  #btnAlt svg{flex:none;opacity:.55;transition:opacity .12s}
+  #btnAlt:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(18,24,38,.96)}
+  #btnAlt:hover svg{opacity:1}
+
+  #chartTools{top:10px;right:10px;display:flex;flex-direction:column;gap:5px;align-items:flex-end}
+  #chartTools .btn{padding:5px 9px;font-size:12px;background:rgba(18,24,38,.88);backdrop-filter:blur(6px)}
+  #chartTools .btn:hover{border-color:var(--cyan);color:var(--cyan)}
+  #btnHome{display:flex;align-items:center;justify-content:center;padding:6px}
+  #btnHome svg{display:block}
+  #circleInfo{top:10px;left:10px;font-size:11.5px;max-width:232px;color:var(--txt2);line-height:1.5}
+  #circleInfo b{color:var(--magenta);filter:brightness(1.7)}
+  #answerBar{bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center}
+  #answerHint{color:var(--txt2);font-size:12px}
+
+  /* ---------- bandeau mode zone ---------- */
+  #zoneBar{
+    top:10px;left:50%;transform:translateX(-50%);display:none;gap:12px;align-items:center;
+    flex-wrap:wrap;justify-content:center;max-width:calc(100% - 20px);font-size:12.5px;
+  }
+  #zoneBar label{display:flex;align-items:center;gap:7px;white-space:nowrap;color:var(--txt2)}
+  #zoneBar input[type=range]{width:120px}
+  #zoneRangeVal{font-family:var(--mono);color:var(--cyan)}
+
+  /* ---------- débriefing ---------- */
+  #debrief{
+    position:absolute;z-index:6;left:12px;right:12px;bottom:12px;display:none;
+    background:rgba(18,24,38,.94);backdrop-filter:blur(8px);
+    border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+  }
+  #debrief.show{display:block}
+  #debrief.ok{border-color:var(--green);background:rgba(58,209,122,.09)}
+  #debrief.bad{border-color:var(--red);background:rgba(239,83,80,.09)}
+  #dbTop{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  #dbErr{font-family:var(--mono);font-size:27px;font-weight:600;color:var(--cyan)}
+  #dbVerdict{font-weight:600;font-size:13px}
+  #debrief.ok #dbVerdict{color:var(--green)}
+  #debrief.bad #dbVerdict{color:#ff9a97}
+  #dbMeta{font-family:var(--mono);color:var(--txt2);font-size:12px;margin-top:7px;line-height:1.6}
+  #dbActions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+
+  /* ---------- tiroir réglages ---------- */
+  #drawer{
+    position:absolute;z-index:20;top:var(--h-top);right:0;bottom:0;width:340px;max-width:92vw;
+    background:var(--panel);border-left:1px solid var(--line);
+    transform:translateX(102%);transition:transform .22s ease;
+    display:flex;flex-direction:column;
+  }
+  #drawer.open{transform:none;box-shadow:-18px 0 40px rgba(0,0,0,.5)}
+  #drawerHead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+  #drawerHead h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt2);font-weight:600}
+  #drawerBody{overflow-y:auto;padding:14px 16px 24px;flex:1}
+  .grp{margin-bottom:20px}
+  .grp>h3{
+    font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--cyan);font-weight:600;margin-bottom:10px;
+  }
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .row>span{color:var(--txt2);font-size:13px}
+  .row .unit{color:var(--txt3);font-size:12px;font-family:var(--mono)}
+  .row input[type=number],.row input[type=text]{width:104px;text-align:right;font-family:var(--mono)}
+  .row input[type=text]{text-align:left;width:152px}
+  .row select{width:162px;text-align:left}
+  .row input[type=range]{width:140px}
+  .readout{
+    background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:10px 12px;font-family:var(--mono);font-size:12.5px;color:var(--txt2);line-height:1.5;
+  }
+  .readout b{color:var(--cyan)}
+  .full{width:100%;margin-top:8px;display:block;text-align:center}
+  .muted{color:var(--txt3);font-size:11px;line-height:1.5;margin-top:8px}
+  #searchWrap{position:relative}
+  #searchInput{width:100%}
+  #inUrl{width:100%;text-align:left;font-size:11.5px;margin-top:2px}
+  #searchRes{list-style:none;margin-top:5px;max-height:172px;overflow-y:auto}
+  #searchRes li{padding:7px 9px;border-radius:6px;cursor:pointer;font-size:13px}
+  #searchRes li:hover{background:var(--panel2)}
+  #searchRes li small{color:var(--txt3);display:block;font-size:11px}
+  #statsBox{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:4px 12px}
+  #statsBox div{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+  #statsBox div:last-child{border-bottom:none}
+  #statsBox span{color:var(--txt2)}
+  #statsBox b{font-family:var(--mono);color:var(--txt);font-weight:500}
+
+  /* ---------- écran d'accueil ---------- */
+  #intro{
+    position:absolute;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;
+    background:rgba(7,10,17,.93);padding:20px;
+  }
+  #introCard{max-width:560px;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:26px 30px}
+  #introCard h1{font-family:var(--mono);font-size:17px;font-weight:600;letter-spacing:.06em;color:var(--cyan)}
+  #introCard h1 span{color:var(--txt3);font-weight:400}
+  #introCard p{color:var(--txt2);font-size:13px;margin-top:10px;line-height:1.6}
+  #introCard ol{color:var(--txt2);font-size:13px;margin:12px 0 0;padding-left:20px;line-height:1.6}
+  #introCard ol li{margin:6px 0}
+  #introCard b{color:var(--txt)}
+  #introActions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
+  #introStatus{margin-top:14px;font-size:11px;color:var(--txt3);font-family:var(--mono)}
+
+  /* ---------- marqueurs carte ---------- */
+  /* MapLibre place et centre lui-même le marqueur : .maplibregl-marker impose
+     position:absolute;left:0;top:0 puis translate(-50%,-50%)+translate(x,y).
+     Ne jamais redéfinir ici la position (une valeur relative remettrait la croix
+     dans le flux normal et la décalerait) ni ajouter de marge négative (elle
+     s'ajouterait au centrage). Le boîtier absolu sert de repère aux pseudo-
+     éléments qui dessinent la croix. */
+  .mk{width:26px;height:26px}
+  .mk::before,.mk::after{content:"";position:absolute;background:currentColor;border-radius:1px}
+  .mk::before{left:50%;top:0;width:2px;height:100%;margin-left:-1px}
+  .mk::after{top:50%;left:0;height:2px;width:100%;margin-top:-1px}
+  .mk-guess{color:var(--blue);cursor:grab;filter:drop-shadow(0 0 3px rgba(0,0,0,.85))}
+  .mk-truth{color:var(--red);filter:drop-shadow(0 0 3px rgba(0,0,0,.85))}
+  .mk-dr{width:14px;height:14px;color:#0b0f17;opacity:.8}
+  .mk-zone{color:var(--cyan);filter:drop-shadow(0 0 3px rgba(0,0,0,.9))}
+  .mk-hdg{width:68px;height:68px;pointer-events:none}
+  .maplibregl-ctrl-attrib{font-size:10px}
+
+  .toast{
+    position:absolute;z-index:30;bottom:16px;left:50%;transform:translateX(-50%);
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:10px 15px;font-size:13px;display:none;
+  }
+  .toast.show{display:block}
+</style>
+</head>
+<body>
+
+<header id="topbar">
+  <div id="brand">NAVID<span>·TRAINER</span></div>
+  <div id="chips">
+    <div class="chip"><i>Manche</i><b id="cRound">—</b></div>
+    <div class="chip"><i>Cap</i><b id="cHdg">—</b></div>
+    <div class="chip"><i>Hauteur</i><b id="cAlt">—</b></div>
+    <div class="chip"><i>Incertitude</i><b id="cRad">—</b></div>
+    <div class="chip"><i>Score moyen</i><b id="cScore">—</b></div>
+  </div>
+  <button class="btn primary" id="btnNew">Nouvelle manche</button>
+  <button class="btn" id="btnSettings">Réglages</button>
+</header>
+
+<main id="stage">
+  <section id="pane3d">
+    <div id="map3d"></div>
+
+    <div class="ov card" id="lookInfo">
+      <div class="big">Regard <span id="lkClock">12 h</span> · <span id="lkAz">—</span></div>
+      <div class="sub">Cap avion <span id="lkHdg">—</span> · site <span id="lkSite">—</span> · champ <span id="lkFov">—</span></div>
+    </div>
+
+    <div class="ov card" id="chronoBox" hidden>
+      <div class="ct-l">Chrono depuis le top départ</div>
+      <div class="ct-v" id="chronoVal">—</div>
+      <div class="ct-s" id="chronoSub"></div>
+    </div>
+
+    <div class="ov card" id="hint3d">
+      Glissez à la souris pour regarder autour · molette&nbsp;= zoom optique · <b>R</b> ou clic sur la rose&nbsp;= recentrer dans l'axe
+    </div>
+
+    <svg class="ov i" id="rose" viewBox="-50 -50 100 100">
+      <title>Cliquer pour recentrer le regard dans l'axe (12 h)</title>
+      <circle id="roseHalo" cx="0" cy="0" r="46" fill="rgba(18,24,38,.88)" stroke="#1f2a3d"/>
+      <g id="roseRing">
+        <g id="roseTicks"></g>
+        <text x="0" y="-31" text-anchor="middle" font-size="11" font-weight="700" fill="#dfe6f0">N</text>
+        <text x="33" y="4" text-anchor="middle" font-size="9" fill="#8a97ad">E</text>
+        <text x="0" y="37" text-anchor="middle" font-size="9" fill="#8a97ad">S</text>
+        <text x="-33" y="4" text-anchor="middle" font-size="9" fill="#8a97ad">W</text>
+      </g>
+      <g id="viewCone"><path d="M0,0 L-11,-40 A41,41 0 0,1 11,-40 Z" fill="rgba(54,197,224,.28)" stroke="rgba(54,197,224,.8)" stroke-width="1"/></g>
+      <path d="M0,-6 L5,5 L0,2 L-5,5 Z" fill="#dfe6f0"/>
+      <circle cx="0" cy="0" r="2" fill="#dfe6f0"/>
+    </svg>
+
+    <div class="ov i" id="altBtns">
+      <button class="btn" id="btnAlt">
+        <svg viewBox="0 0 12 14" width="11" height="13" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3.5 5 V12 M1.4 7.1 L3.5 5 L5.6 7.1"/>
+          <path d="M8.5 9 V2 M6.4 6.9 L8.5 9 L10.6 6.9"/>
+        </svg>
+        <span id="altTxt">Hauteur <b>500 ft</b> sol</span>
+      </button>
+    </div>
+  </section>
+
+  <div id="splitter"></div>
+
+  <section id="paneChart">
+    <div id="mapChart"></div>
+
+    <div class="ov card" id="circleInfo">
+      Vous êtes quelque part dans le <b>cercle d'incertitude</b><span id="ciTxt"></span>.
+    </div>
+
+    <div class="ov i" id="chartTools">
+      <button class="btn on" id="btnUp" title="Orientation de la carte">Route en haut</button>
+      <button class="btn" id="btnLayer" title="Disponible au débriefing" disabled>Voir l'ortho</button>
+      <button class="btn" id="btnHome" title="Recentrer sur le cercle, cadrage par défaut">
+        <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor"
+             stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M1.8 7.2 L8 2 L14.2 7.2"/><path d="M3.4 6.6 V13.6 H12.6 V6.6"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="ov i" id="answerBar">
+      <span class="hintTxt card" id="answerHint">Cliquez sur la carte où vous pensez être</span>
+      <button class="btn primary" id="btnValidate" disabled>Valider</button>
+      <button class="btn" id="btnReveal">Révéler</button>
+    </div>
+
+    <div class="ov i card" id="zoneBar">
+      <span>Zone : cliquez sur la carte pour placer le centre</span>
+      <label>Rayon <input type="range" id="zoneRange" min="5" max="100" step="1"> <b id="zoneRangeVal"></b></label>
+      <button class="btn primary" id="btnZoneDone">Terminer</button>
+    </div>
+
+    <div id="debrief">
+      <div id="dbTop">
+        <div id="dbErr">—</div>
+        <div id="dbVerdict"></div>
+      </div>
+      <div id="dbMeta"></div>
+      <div id="dbActions">
+        <button class="btn primary" id="btnNext">Manche suivante</button>
+        <button class="btn" id="btnZoomTruth">Zoomer sur la position vraie</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<aside id="drawer">
+  <div id="drawerHead">
+    <h2>Réglages</h2>
+    <button class="btn" id="btnCloseDrawer">Fermer</button>
+  </div>
+  <div id="drawerBody">
+
+    <div class="grp">
+      <h3>Fond de carte</h3>
+      <div class="row"><span>Source</span>
+        <select id="inSource">
+          <option value="ign">Carte OACI de l'IGN</option>
+          <option value="perso" id="optPerso" disabled>Ma carte (MBTiles)</option>
+          <option value="url">Adresse de tuiles…</option>
+        </select>
+      </div>
+      <div id="rowUrl" hidden>
+        <input type="text" id="inUrl" placeholder="https://moi.github.io/cartes/{z}/{x}/{y}.jpg">
+        <div class="row" style="margin-top:8px"><span>Zoom maximum</span>
+          <input type="number" id="inUrlZ" min="6" max="18" step="1"> <span class="unit">niv.</span></div>
+      </div>
+      <p class="muted" id="fondInfo"></p>
+    </div>
+
+    <div class="grp">
+      <h3>Zone d'entraînement</h3>
+      <div id="searchWrap">
+        <input type="text" id="searchInput" placeholder="Rechercher une commune, un lieu-dit…" autocomplete="off">
+        <ul id="searchRes"></ul>
+      </div>
+      <div class="row" style="margin-top:8px"><span>Centre</span><input type="text" id="inCenter" placeholder="44.9226, 4.9218"></div>
+      <div class="row"><span>Rayon</span><input type="number" id="inZoneR" min="5" max="150" step="1"> <span class="unit">NM</span></div>
+      <button class="btn full" id="btnPickZone">Placer le centre sur la carte</button>
+      <p class="muted">Les positions sont tirées au hasard dans ce disque, sur terre et dans la couverture de la carte OACI.</p>
+    </div>
+
+    <div class="grp">
+      <h3>Cercle d'incertitude</h3>
+      <div class="row"><span>Vitesse sol</span><input type="number" id="inGs" min="40" max="400" step="5"> <span class="unit">kt</span></div>
+      <div class="row"><span>Temps écoulé</span><input type="number" id="inTime" min="0.25" max="15" step="0.25"> <span class="unit">min</span></div>
+      <div class="row"><span>Rayon direct</span><input type="number" id="inRadius" min="0.2" max="40" step="0.1" disabled> <span class="unit">NM</span></div>
+      <div class="row"><span>Saisir le rayon</span><input type="checkbox" id="inDirect"></div>
+      <div class="readout" id="radiusOut"></div>
+      <div class="row" style="margin-top:8px"><span>Centre du cercle</span>
+        <select id="inCircleMode">
+          <option value="dr">Position estimée (réaliste)</option>
+          <option value="truth">Position vraie (facile)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grp">
+      <h3>Vol</h3>
+      <div class="row"><span>Hauteur sol</span><input type="number" id="inAlt" min="200" max="6000" step="100"> <span class="unit">ft</span></div>
+      <div class="row"><span>Champ de vision</span><input type="range" id="inFov" min="25" max="80" step="1"> <b id="fovVal"></b></div>
+      <div class="row"><span>Cap imposé</span><input type="number" id="inHdg" min="0" max="359" step="1" placeholder="aléatoire"></div>
+      <p class="muted">Laissez le cap vide pour un tirage aléatoire à chaque manche.</p>
+    </div>
+
+    <div class="grp">
+      <h3>Session</h3>
+      <div class="readout" id="statsBox"></div>
+      <button class="btn full" id="btnResetStats">Réinitialiser les statistiques</button>
+    </div>
+
+  </div>
+</aside>
+
+<div id="intro">
+  <div id="introCard">
+    <h1>NAVID<span>·TRAINER</span></h1>
+    <p>Entraînement à l'identification en navigation à vue, sur la carte OACI 1/500 000.</p>
+    <ol>
+      <li>À gauche, la vue <b>depuis l'avion à 500 ft sol</b> : regardez autour à la souris, comme dans le cockpit.</li>
+      <li>À droite, la carte OACI orientée <b>route en haut</b>, avec le <b>cercle d'incertitude</b> : votre position vraie est forcément dedans.</li>
+      <li>Cliquez sur la carte à l'endroit où vous pensez être, puis <b>Valider</b>. Le débriefing donne l'erreur en NM.</li>
+    </ol>
+    <div id="introActions">
+      <button class="btn primary" id="btnStart" disabled>Commencer</button>
+      <button class="btn" id="btnIntroZone">Choisir la zone</button>
+    </div>
+    <div id="introStatus">Chargement des cartes…</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
+<script>
+'use strict';
+
+/* ==========================================================================
+   CONFIG — sources de données (toutes libres, sans clé ni compte)
+   ========================================================================== */
+const CFG = {
+  // Carte aéronautique OACI-VFR 1/500 000 — IGN Géoplateforme (zoom 6 à 11)
+  oaci : 'https://data.geopf.fr/private/wmts?apikey=ign_scan_ws&SERVICE=WMTS&VERSION=1.0.0'
+       + '&REQUEST=GetTile&LAYER=GEOGRAPHICALGRIDSYSTEMS.MAPS.SCAN-OACI&STYLE=normal'
+       + '&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+  // Orthophotographies IGN — jusqu'au zoom 19 (~0,3 m/px)
+  ortho: 'https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0'
+       + '&REQUEST=GetTile&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal'
+       + '&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+  // Modèle numérique de terrain — AWS Terrain Tiles, encodage terrarium
+  dem  : 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png',
+  // Géocodage IGN (recherche de la zone)
+  geocode: 'https://data.geopf.fr/geocodage/search',
+  // Emprise de la carte OACI (WGS84) : France métropolitaine + Corse
+  bbox : {w:-5.99644, s:40.3893, e:11.146, n:51.4441},
+  attrIGN  : '© IGN / Géoplateforme — carte OACI-VFR (SIA/DGAC)',
+  attrTerr : 'Relief : Mapzen / AWS Terrain Tiles',
+  oaciMaxZoom: 11,
+  demZoom: 12          // zoom des tuiles MNT utilisées pour les tests terre/mer
+};
+
+const NM = 1852, FT = 0.3048, R_EARTH = 6371008.8;
+const LS_SET = 'navid.v1.settings', LS_HIST = 'navid.v1.history';
+
+/* ==========================================================================
+   GEO — utilitaires géodésiques
+   ========================================================================== */
+const rad = d => d * Math.PI / 180;
+const deg = r => r * 180 / Math.PI;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const norm360 = a => ((a % 360) + 360) % 360;
+
+/** Point à `dist` mètres dans la direction `brg` (degrés vrais) depuis lat/lon. */
+function destPoint(lat, lon, brg, dist){
+  const d = dist / R_EARTH, b = rad(brg), p1 = rad(lat), l1 = rad(lon);
+  const sp = Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b);
+  const p2 = Math.asin(sp);
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1),
+                             Math.cos(d) - Math.sin(p1) * sp);
+  return { lat: deg(p2), lon: ((deg(l2) + 540) % 360) - 180 };
+}
+
+/** Distance orthodromique en mètres. */
+function distance(a, b){
+  const p1 = rad(a.lat), p2 = rad(b.lat);
+  const dp = rad(b.lat - a.lat), dl = rad(b.lon - a.lon);
+  const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * R_EARTH * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Relèvement vrai de a vers b, en degrés. */
+function bearingTo(a, b){
+  const p1 = rad(a.lat), p2 = rad(b.lat), dl = rad(b.lon - a.lon);
+  const y = Math.sin(dl) * Math.cos(p2);
+  const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl);
+  return norm360(deg(Math.atan2(y, x)));
+}
+
+/** Anneau géodésique fermé — reste circulaire quelle que soit la rotation de la carte. */
+function circleRing(c, radiusM, n = 144){
+  const ring = [];
+  for (let i = 0; i <= n; i++){
+    const p = destPoint(c.lat, c.lon, i * 360 / n, radiusM);
+    ring.push([p.lon, p.lat]);
+  }
+  return ring;
+}
+
+function polyFeature(ring){
+  return { type:'Feature', properties:{}, geometry:{ type:'Polygon', coordinates:[ring] } };
+}
+
+/** Tirage uniforme en surface dans un disque. */
+function randomInDisc(c, radiusM){
+  return destPoint(c.lat, c.lon, Math.random() * 360, radiusM * Math.sqrt(Math.random()));
+}
+
+/** Emprise réellement exploitable : couverture de l'orthophoto (France) croisée
+ *  avec celle du fond de carte choisi. Un fond personnel couvrant une seule
+ *  région doit interdire les tirages ailleurs, sinon la carte serait blanche. */
+function empriseUtile(){
+  const b = CFG.bbox, f = fondCourant;
+  if (!f || !f.bounds) return b;
+  return { w:Math.max(b.w, f.bounds[0]), s:Math.max(b.s, f.bounds[1]),
+           e:Math.min(b.e, f.bounds[2]), n:Math.min(b.n, f.bounds[3]) };
+}
+
+function inBbox(p){
+  const b = empriseUtile();
+  return p.lon > b.w && p.lon < b.e && p.lat > b.s && p.lat < b.n;
+}
+
+function fmtLatLon(p){
+  return p.lat.toFixed(4) + ', ' + p.lon.toFixed(4);
+}
+
+/* ==========================================================================
+   MNT — décodage des tuiles terrarium (test terre/mer + altitude grossière)
+   ========================================================================== */
+const demCache = new Map(), demPending = new Map();
+
+function tilePixel(lon, lat, z){
+  const n = 2 ** z;
+  const xf = (lon + 180) / 360 * n;
+  const s  = Math.sin(rad(lat));
+  const yf = (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n;
+  const x = Math.floor(xf), y = Math.floor(yf);
+  return { x, y, px: clamp(Math.floor((xf - x) * 256), 0, 255),
+                 py: clamp(Math.floor((yf - y) * 256), 0, 255) };
+}
+
+function loadDemTile(z, x, y){
+  const key = z + '/' + x + '/' + y;
+  if (demCache.has(key))   return Promise.resolve(demCache.get(key));
+  if (demPending.has(key)) return demPending.get(key);
+  const p = new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try{
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 256;
+        const ctx = cv.getContext('2d', { willReadFrequently:true });
+        ctx.drawImage(img, 0, 0, 256, 256);
+        const data = ctx.getImageData(0, 0, 256, 256).data;
+        demCache.set(key, data); resolve(data);
+      }catch(e){ demCache.set(key, null); resolve(null); }
+    };
+    img.onerror = () => { demCache.set(key, null); resolve(null); };
+    img.src = CFG.dem.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+  });
+  demPending.set(key, p);
+  return p;
+}
+
+/** Altitude du sol en mètres, ou null si la tuile est indisponible. */
+async function demElevation(lat, lon, z = CFG.demZoom){
+  const t = tilePixel(lon, lat, z);
+  const d = await loadDemTile(z, t.x, t.y);
+  if (!d) return null;
+  const i = (t.py * 256 + t.px) * 4;
+  return d[i] * 256 + d[i + 1] + d[i + 2] / 256 - 32768;
+}
+
+/* ==========================================================================
+   ÉTAT
+   ========================================================================== */
+const ALT_BASSE = 500, ALT_HAUTE = 1500;   // hauteurs sol de la bascule rapide
+
+const DEFAULTS = {
+  zone:{ lat:44.9226, lon:4.9218 },   // Valence — relief, fleuve, axes, villages
+  zoneR:25,                            // NM
+  gs:130, timeMin:1, radiusNM:2.17, direct:false,
+  circleMode:'dr',
+  altFt:500, fov:55, chartUp:'route',
+  source:'ign', urlTuiles:'', urlMaxZoom:11,
+  fixedHdg:null
+};
+
+/* ---- fond de carte : IGN en ligne, MBTiles local, ou adresse de tuiles ---- */
+let fondCourant = null;          // source réellement appliquée à la carte
+
+/** Décrit la source demandée par les réglages. */
+function sourceCarte(){
+  const c = S.carteInfo;
+  if (S.set.source === 'perso' && c && c.raster)
+    return { tiles:['mbtiles/{z}/{x}/{y}'], minzoom:c.minzoom, maxzoom:c.maxzoom,
+             bounds:c.bounds, nom:c.nom, attribution:'Carte personnelle — ' + c.nom };
+  if (S.set.source === 'url' && (S.set.urlTuiles || '').trim())
+    return { tiles:[S.set.urlTuiles.trim()], minzoom:6, maxzoom:S.set.urlMaxZoom,
+             bounds:null, nom:'Tuiles personnalisées', attribution:'Tuiles personnalisées' };
+  return { tiles:[CFG.oaci], minzoom:6, maxzoom:CFG.oaciMaxZoom,
+           bounds:null, nom:"Carte OACI de l'IGN", attribution:CFG.attrIGN };
+}
+
+const S = {
+  set: Object.assign({}, DEFAULTS),
+  carteInfo: null,               // métadonnées du MBTiles servi en local, si présent
+  mode:'intro',                        // intro | zone | play | debrief
+  round:null,
+  view:{ rel:0, site:8 },              // azimut relatif du regard / site (dépression)
+  hist:[],
+  ready:{ chart:false, view:false },
+  drag:null,
+  elevFixed:false
+};
+
+function loadState(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LS_SET) || 'null');
+    if (s) Object.assign(S.set, DEFAULTS, s);
+    const h = JSON.parse(localStorage.getItem(LS_HIST) || 'null');
+    if (Array.isArray(h)) S.hist = h;
+  }catch(e){ /* réglages illisibles : on repart des valeurs par défaut */ }
+}
+function saveSettings(){ try{ localStorage.setItem(LS_SET, JSON.stringify(S.set)); }catch(e){} }
+function saveHist(){ try{ localStorage.setItem(LS_HIST, JSON.stringify(S.hist.slice(-200))); }catch(e){} }
+
+/** Rayon d'incertitude courant, en mètres. */
+function uncertaintyM(){
+  const nm = S.set.direct ? S.set.radiusNM : (S.set.gs * S.set.timeMin / 60);
+  return clamp(nm, 0.2, 60) * NM;
+}
+
+/* ==========================================================================
+   CARTES
+   ========================================================================== */
+const $ = id => document.getElementById(id);
+
+const map3d = new maplibregl.Map({
+  container:'map3d',
+  maxPitch:88,
+  minZoom:6,
+  attributionControl:{ compact:true },
+  style:{
+    version:8,
+    sources:{
+      ortho:{ type:'raster', tiles:[CFG.ortho], tileSize:256, maxzoom:19, attribution:CFG.attrIGN },
+      dem  :{ type:'raster-dem', tiles:[CFG.dem], tileSize:256, maxzoom:14,
+              encoding:'terrarium', attribution:CFG.attrTerr }
+    },
+    layers:[
+      { id:'bg', type:'background', paint:{ 'background-color':'#b9d4ea' } },
+      { id:'ortho', type:'raster', source:'ortho', paint:{ 'raster-fade-duration':150 } }
+    ],
+    terrain:{ source:'dem', exaggeration:1 },
+    sky:{
+      'sky-color':'#6fa8de', 'horizon-color':'#d6e4f0', 'fog-color':'#dde8f0',
+      'fog-ground-blend':0.55, 'horizon-fog-blend':0.5,
+      'sky-horizon-blend':0.85, 'atmosphere-blend':0.6
+    }
+  },
+  center:[DEFAULTS.zone.lon, DEFAULTS.zone.lat], zoom:14, pitch:80
+});
+
+// La vue 3D n'est pilotée que par notre caméra : on coupe toutes les interactions natives.
+['dragPan','dragRotate','scrollZoom','boxZoom','doubleClickZoom','touchZoomRotate','keyboard','touchPitch']
+  .forEach(h => { if (map3d[h] && map3d[h].disable) map3d[h].disable(); });
+map3d.setCenterClampedToGround(false);
+
+const chart = new maplibregl.Map({
+  container:'mapChart',
+  minZoom:6, maxZoom:14,
+  dragRotate:false, touchPitch:false, pitchWithRotate:false,
+  attributionControl:{ compact:true },
+  style:{
+    version:8,
+    sources:{
+      oaci  :{ type:'raster', tiles:[CFG.oaci],  tileSize:256, minzoom:6,
+               maxzoom:CFG.oaciMaxZoom, attribution:CFG.attrIGN },
+      orthoC:{ type:'raster', tiles:[CFG.ortho], tileSize:256, maxzoom:19, attribution:CFG.attrIGN }
+    },
+    layers:[
+      { id:'bg', type:'background', paint:{ 'background-color':'#e9eff4' } },
+      { id:'oaci',   type:'raster', source:'oaci' },
+      { id:'orthoC', type:'raster', source:'orthoC', layout:{ visibility:'none' } }
+    ]
+  },
+  center:[DEFAULTS.zone.lon, DEFAULTS.zone.lat], zoom:10
+});
+chart.touchZoomRotate.disableRotation();
+chart.addControl(new maplibregl.ScaleControl({ unit:'nautical', maxWidth:110 }), 'bottom-left');
+chart.addControl(new maplibregl.NavigationControl({ showCompass:false, visualizePitch:false }), 'bottom-right');
+
+const EMPTY = { type:'FeatureCollection', features:[] };
+
+/** Ajoute les couches de travail de la carte. Idempotent : appelé sur 'load',
+ *  sur 'idle' et par sécurité après un court délai — le style peut être prêt
+ *  avant que la carte n'ait eu l'occasion de peindre une première image. */
+function initChartLayers(){
+  if (S.ready.chart) return;
+  if (!chart.isStyleLoaded()){ setTimeout(initChartLayers, 200); return; }
+
+  chart.addSource('circle', { type:'geojson', data:EMPTY });
+  chart.addSource('zone',   { type:'geojson', data:EMPTY });
+  chart.addSource('err',    { type:'geojson', data:EMPTY });
+
+  // Cercle de zone : le vert se confondait avec les teintes de végétation et de
+  // relief de la carte OACI. Cyan de la charte, posé sur un liseré sombre — le
+  // doublage garantit le contraste aussi bien sur les fonds clairs que colorés.
+  chart.addLayer({ id:'zone-fill', type:'fill', source:'zone',
+    paint:{ 'fill-color':'#36c5e0', 'fill-opacity':0.08 } });
+  chart.addLayer({ id:'zone-casing', type:'line', source:'zone',
+    paint:{ 'line-color':'#0b0f17', 'line-width':6.5, 'line-opacity':0.8 } });
+  chart.addLayer({ id:'zone-line', type:'line', source:'zone',
+    paint:{ 'line-color':'#36c5e0', 'line-width':2.6, 'line-dasharray':[2.4,1.7] } });
+
+  chart.addLayer({ id:'circle-fill', type:'fill', source:'circle',
+    paint:{ 'fill-color':'#d0006f', 'fill-opacity':0.07 } });
+  chart.addLayer({ id:'circle-line', type:'line', source:'circle',
+    paint:{ 'line-color':'#d0006f', 'line-width':2.2, 'line-dasharray':[3,2] } });
+
+  chart.addLayer({ id:'err-line', type:'line', source:'err',
+    paint:{ 'line-color':'#ef5350', 'line-width':2.5 } });
+
+  appliquerFond();
+  detecterCartePerso();
+
+  S.ready.chart = true; checkReady();
+}
+chart.on('load',   initChartLayers);
+chart.once('idle', initChartLayers);
+setTimeout(initChartLayers, 1200);
+
+// La vue 3D attend son relief : on la déclare prête sur 'load', sur 'idle',
+// et au pire après 6 s — elle ne doit jamais bloquer le démarrage.
+map3d.on('load',  () => { S.ready.view = true; checkReady(); });
+map3d.once('idle',() => { S.ready.view = true; checkReady(); });
+setTimeout(()   => { S.ready.view = true; checkReady(); }, 6000);
+map3d.on('error', e => { /* tuiles manquantes en bord de couverture : sans conséquence */ });
+chart.on('error', e => {});
+
+function checkReady(){
+  if (!S.ready.chart) return;
+  $('btnStart').disabled = false;
+  $('introStatus').textContent = S.ready.view
+    ? 'Cartes prêtes.' : 'Carte OACI prête — le relief finit de charger.';
+}
+
+/* ---- marqueurs ---- */
+function makeMarker(cls, draggable){
+  const el = document.createElement('div');
+  el.className = 'mk ' + cls;
+  return new maplibregl.Marker({ element:el, draggable:!!draggable, rotationAlignment:'viewport' });
+}
+const mkGuess = makeMarker('mk-guess', true);
+const mkTruth = makeMarker('mk-truth');
+const mkDR    = makeMarker('mk-dr');
+const mkZone  = makeMarker('mk-zone');
+
+/** Flèche de cap, montrée au débriefing sur la position vraie.
+ *  `rotationAlignment:'map'` fait appliquer rotateZ(rotation − cap carte) :
+ *  la flèche colle donc au terrain, en route-up comme en nord-en-haut. */
+const mkHdg = (() => {
+  const fleche = '<path d="M0,-14 L0,-28"/><path d="M-5.5,-23.5 L0,-31 L5.5,-23.5"/>';
+  const el = document.createElement('div');
+  el.className = 'mk-hdg';
+  el.innerHTML =
+    '<svg viewBox="-34 -34 68 68" width="68" height="68">'
+  + '<g fill="none" stroke="#0b0f17" stroke-width="5.5" stroke-linecap="round"'
+  + ' stroke-linejoin="round" opacity=".5">' + fleche + '</g>'
+  + '<g fill="none" stroke="#f0a020" stroke-width="2.6" stroke-linecap="round"'
+  + ' stroke-linejoin="round">' + fleche + '</g></svg>';
+  return new maplibregl.Marker({ element:el, rotationAlignment:'map', pitchAlignment:'viewport' });
+})();
+
+mkGuess.on('dragend', () => {
+  if (S.mode !== 'play') return;
+  const l = mkGuess.getLngLat();
+  S.round.guess = { lat:l.lat, lon:l.lng };
+});
+
+function showMarker(mk, on, pos){
+  if (pos) mk.setLngLat([pos.lon, pos.lat]);
+  if (on && !mk._added){ mk.addTo(chart); mk._added = true; }
+  if (!on && mk._added){ mk.remove(); mk._added = false; }
+}
+
+/* ==========================================================================
+   VUE 3D — caméra placée exactement à la hauteur sol demandée
+   ========================================================================== */
+/**
+ * Place la caméra à la position vraie, `altFt` pieds au-dessus du sol,
+ * regardant dans la direction `azimut = cap + regard relatif`, avec une
+ * dépression `site` degrés sous l'horizon.
+ *
+ * MapLibre v5 n'expose pas setFreeCameraOptions ; calculateCameraOptionsFromTo
+ * fait exactement l'inverse dont on a besoin : (position caméra + altitude,
+ * point visé + altitude) -> {center, zoom, pitch, bearing, elevation}.
+ */
+function updateCamera(){
+  const r = S.round;
+  if (!r) return;
+
+  const agl    = S.set.altFt * FT;
+  const camAlt = r.groundElev + agl;
+  const site   = clamp(S.view.site, 4, 75);
+  const az     = norm360(r.heading + S.view.rel);
+
+  // Le point visé est purement géométrique : il est posé sur le plan horizontal
+  // du sol de l'avion, à la distance qui donne exactement la dépression voulue.
+  // On n'interroge surtout pas le relief au point visé : un terrain plus haut que
+  // l'avion (vol en vallée) ferait basculer la caméra à la verticale, voire sous
+  // la surface. Le relief devant apparaît alors naturellement dans le champ.
+  const D      = agl / Math.tan(rad(site));
+  const target = destPoint(r.truth.lat, r.truth.lon, az, D);
+
+  let cam;
+  try{
+    cam = map3d.calculateCameraOptionsFromTo(
+      new maplibregl.LngLat(r.truth.lon, r.truth.lat), camAlt,
+      new maplibregl.LngLat(target.lon, target.lat), r.groundElev);
+  }catch(e){ return; }
+
+  cam.pitch = clamp(cam.pitch, 0, 88);
+  map3d.jumpTo(cam);
+  if (S.set.chartUp === 'regard') chart.setBearing(chartBearing());
+  updateLookHud();
+}
+
+function updateLookHud(){
+  const r = S.round; if (!r) return;
+  const rel = S.view.rel;
+  let h = Math.round(norm360(rel) / 30); if (h === 0) h = 12;
+  $('lkClock').textContent = h + ' h';
+  $('lkAz').textContent    = String(Math.round(norm360(r.heading + rel))).padStart(3, '0') + '°';
+  $('lkHdg').textContent   = String(Math.round(r.heading)).padStart(3, '0') + '°';
+  $('lkSite').textContent  = Math.round(S.view.site) + '°';
+  $('lkFov').textContent   = Math.round(S.set.fov) + '°';
+  $('roseRing').setAttribute('transform', 'rotate(' + (-r.heading) + ')');
+  $('viewCone').setAttribute('transform', 'rotate(' + rel + ')');
+}
+
+/* ---- regard libre à la souris / au doigt ---- */
+(function setupLook(){
+  const el = $('map3d');
+  el.style.cursor = 'grab';
+
+  el.addEventListener('pointerdown', ev => {
+    if (S.mode === 'intro') return;
+    S.drag = { x:ev.clientX, y:ev.clientY, id:ev.pointerId };
+    try{ el.setPointerCapture(ev.pointerId); }catch(e){}   // capture facultative
+    el.style.cursor = 'grabbing';
+  });
+  el.addEventListener('pointermove', ev => {
+    if (!S.drag || S.drag.id !== ev.pointerId) return;
+    const dx = ev.clientX - S.drag.x, dy = ev.clientY - S.drag.y;
+    S.drag.x = ev.clientX; S.drag.y = ev.clientY;
+    // Sens « on attrape le paysage » : le décor suit le curseur, donc la caméra
+    // part à l'opposé du geste — comme dans Google Earth.
+    S.view.rel  = norm360(S.view.rel - dx * 0.22);
+    if (S.view.rel > 180) S.view.rel -= 360;
+    S.view.site = clamp(S.view.site - dy * 0.14, 4, 75);
+    updateCamera();
+  });
+  const end = ev => {
+    if (!S.drag) return;
+    try{ el.releasePointerCapture(S.drag.id); }catch(e){}
+    S.drag = null; el.style.cursor = 'grab';
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+
+  el.addEventListener('wheel', ev => {
+    if (S.mode === 'intro') return;
+    ev.preventDefault();
+    S.set.fov = clamp(S.set.fov + Math.sign(ev.deltaY) * 3, 25, 80);
+    $('inFov').value = Math.round(S.set.fov);
+    $('fovVal').textContent = Math.round(S.set.fov) + '°';
+    map3d.setVerticalFieldOfView(S.set.fov);
+    saveSettings(); updateCamera();
+  }, { passive:false });
+
+  /** Remet le regard dans l'axe de l'avion, site par défaut. */
+  function recentrerRegard(){ S.view.rel = 0; S.view.site = 8; updateCamera(); }
+
+  // Un clic sur la rose des vents ramène le regard à midi.
+  $('rose').addEventListener('click', recentrerRegard);
+
+  // Bascule rapide entre les deux hauteurs de travail.
+  $('btnAlt').addEventListener('click', () => {
+    S.set.altFt = (S.set.altFt === ALT_BASSE) ? ALT_HAUTE : ALT_BASSE;
+    saveSettings(); updateChips(); syncForm();
+    if (S.round) updateCamera();
+  });
+
+  window.addEventListener('keydown', ev => {
+    if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    const k = ev.key.toLowerCase();
+    if (k === 'r'){ recentrerRegard(); }
+    else if (ev.key === 'ArrowLeft')  { S.view.rel = norm360(S.view.rel - 5); if (S.view.rel > 180) S.view.rel -= 360; updateCamera(); }
+    else if (ev.key === 'ArrowRight') { S.view.rel = norm360(S.view.rel + 5); if (S.view.rel > 180) S.view.rel -= 360; updateCamera(); }
+    else if (ev.key === 'ArrowUp')    { S.view.site = clamp(S.view.site - 2, 4, 75); updateCamera(); }
+    else if (ev.key === 'ArrowDown')  { S.view.site = clamp(S.view.site + 2, 4, 75); updateCamera(); }
+    else if (k === 'n' && S.mode !== 'intro'){ newRound(); }
+    else if (ev.key === 'Enter' && S.mode === 'play' && S.round.guess){ validate(); }
+    else return;
+    ev.preventDefault();
+  });
+})();
+
+/* ==========================================================================
+   MANCHE
+   ========================================================================== */
+function toast(msg, ms = 2200){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/** Tire une position vraie valide : dans l'emprise OACI, sur terre. */
+async function pickTruth(){
+  const zone = S.set.zone, zr = S.set.zoneR * NM;
+  for (let i = 0; i < 60; i++){
+    const p = randomInDisc(zone, zr);
+    if (!inBbox(p)) continue;
+    const e = await demElevation(p.lat, p.lon);
+    if (e == null || e < 1) continue;            // mer, ou MNT indisponible
+    return { pos:p, elev:e };
+  }
+  return null;
+}
+
+async function newRound(){
+  if (!S.ready.chart) return;
+  $('btnNew').disabled = true;
+  const found = await pickTruth();
+  $('btnNew').disabled = false;
+
+  if (!found){
+    toast('Aucune position valide dans cette zone (mer ou hors couverture). Déplacez le centre.', 4200);
+    return;
+  }
+
+  const R = uncertaintyM();
+  const heading = (S.set.fixedHdg == null)
+      ? Math.floor(Math.random() * 72) * 5          // 000 à 355, par pas de 5°
+      : norm360(S.set.fixedHdg);
+
+  const center = (S.set.circleMode === 'truth')
+      ? found.pos
+      : randomInDisc(found.pos, R * 0.98);       // la vérité reste dans le cercle
+
+  S.round = {
+    n: (S.round ? S.round.n : 0) + 1,
+    truth: found.pos, groundElev: found.elev,
+    heading, center, radiusM: R,
+    guess: null, answered:false, t0: Date.now()
+  };
+  S.view = { rel:0, site:8 };
+  S.elevFixed = false;
+  setMode('play');
+
+  // --- vue 3D ---
+  map3d.setVerticalFieldOfView(S.set.fov);
+  map3d.jumpTo({ center:[found.pos.lon, found.pos.lat], zoom:14, pitch:70,
+                 bearing:heading, elevation:found.elev });
+  updateCamera();
+
+  // --- carte ---
+  chart.setLayoutProperty('orthoC', 'visibility', 'none');
+  $('btnLayer').textContent = "Voir l'ortho";
+  $('btnLayer').classList.remove('on');
+  $('btnLayer').disabled = true;
+
+  chart.getSource('circle').setData(polyFeature(circleRing(center, R)));
+  chart.getSource('zone').setData(EMPTY);
+  chart.getSource('err').setData(EMPTY);
+  showMarker(mkDR, S.set.circleMode === 'dr', center);
+  showMarker(mkGuess, false);
+  showMarker(mkTruth, false);
+  showMarker(mkZone, false);
+  showMarker(mkHdg, false);
+
+  chart.setBearing(chartBearing());
+  chart.jumpTo({ center:[center.lon, center.lat], zoom: zoomForCircle(center.lat, R) });
+
+  updateChips();
+}
+
+/** Cap vers lequel la carte est orientée, selon le mode choisi.
+ *  'route'  : le cap de l'avion en haut (orientation classique de navigation)
+ *  'regard' : la direction regardée dans la vue 3D en haut — la carte pivote
+ *             avec le regard, ce qui colle au paysage que l'on a sous les yeux
+ *  'north'  : nord en haut */
+function chartBearing(){
+  if (!S.round || S.set.chartUp === 'north') return 0;
+  if (S.set.chartUp === 'regard') return norm360(S.round.heading + S.view.rel);
+  return S.round.heading;
+}
+
+const LIBELLE_ORIENTATION = { route:'Route en haut', regard:'Regard en haut', north:'Nord en haut' };
+
+/** Interroge le serveur local : un .mbtiles depose dans le dossier est detecte
+ *  automatiquement. Echoue silencieusement si la page est ouverte sans serveur. */
+async function detecterCartePerso(){
+  try{
+    const r = await fetch('mbtiles/info');
+    if (!r.ok) return;
+    const info = await r.json();
+    if (!info) return;
+    S.carteInfo = info;
+    const opt = $('optPerso');
+    opt.disabled = !info.raster;
+    opt.textContent = info.raster ? 'Ma carte — ' + info.nom
+                                  : 'Ma carte (vectorielle, non prise en charge)';
+    if (S.set.source === 'perso' && info.raster) appliquerFond();
+    majInfoFond();
+  }catch(e){ /* pas de serveur local : on reste sur la carte en ligne */ }
+}
+
+/** Ligne d'explication sous le selecteur de fond. */
+function majInfoFond(){
+  const f = fondCourant; if (!f) return;
+  let t;
+  if (S.set.source === 'perso' && S.carteInfo)
+    t = S.carteInfo.fichier + ' · ' + S.carteInfo.tuiles + ' tuiles · zoom '
+      + f.minzoom + ' a ' + f.maxzoom + '.';
+  else if (S.set.source === 'url')
+    t = 'Tuiles en Web Mercator, schema {z}/{x}/{y}. Le serveur doit autoriser CORS'
+      + " — c'est le cas de GitHub Pages.";
+  else
+    t = 'Carte OACI-VFR de l IGN, zoom 6 a 11 : la resolution native du 1/500 000.';
+  if (f.bounds){
+    const b = empriseUtile();
+    t += ' Tirages limites a ' + b.s.toFixed(2) + '–' + b.n.toFixed(2) + '° N, '
+       + b.w.toFixed(2) + '–' + b.e.toFixed(2) + '° E.';
+  }
+  if (!S.carteInfo && S.set.source !== 'url')
+    t += ' Pour un MBTiles local, placez le fichier dans le dossier et lancez start.cmd.';
+  $('fondInfo').textContent = t;
+}
+
+/** (Re)construit la couche de fond de la carte selon la source choisie.
+ *  On retire puis recree la source : minzoom et maxzoom ne sont pas modifiables
+ *  en place sur une source raster MapLibre. */
+function appliquerFond(){
+  const f = sourceCarte();
+  fondCourant = f;
+  if (chart.getLayer('oaci'))  chart.removeLayer('oaci');
+  if (chart.getSource('oaci')) chart.removeSource('oaci');
+  chart.addSource('oaci', { type:'raster', tiles:f.tiles, tileSize:256,
+                            minzoom:f.minzoom, maxzoom:f.maxzoom, attribution:f.attribution });
+  chart.addLayer({ id:'oaci', type:'raster', source:'oaci' }, 'orthoC');
+  chart.setMinZoom(Math.min(6, f.minzoom));
+  chart.setMaxZoom(Math.max(14, f.maxzoom + 2));
+
+  // Si la zone de travail tombe hors du nouveau fond, on la recentre dessus.
+  if (f.bounds && !inBbox(S.set.zone)){
+    const b = empriseUtile();
+    S.set.zone = { lat:(b.s + b.n) / 2, lon:(b.w + b.e) / 2 };
+    saveSettings();
+    toast('Zone replacee au centre de ' + f.nom, 3200);
+  }
+  majInfoFond();
+}
+
+/** Part de la plus petite dimension du panneau occupée par le diamètre du cercle.
+ *  0,38 laisse largement de quoi lire le terrain autour — c'est le recul d'environ
+ *  neuf crans de molette par rapport à un cadrage collé au cercle. */
+const CADRAGE_CERCLE = 0.38;
+
+/** Zoom donnant au cercle la part d'écran voulue.
+ *  MapLibre compte ses zooms sur une tuile de 512 px (monde = 512·2^z pixels) et
+ *  non 256 comme la convention habituelle des fonds de carte : d'où le 78271 et
+ *  non 156543. Avec 156543 on obtient un zoom exactement un niveau trop serré. */
+function zoomForCircle(lat, R){
+  const c = chart.getCanvas();
+  const minDim = Math.max(160, Math.min(c.clientWidth, c.clientHeight));
+  const mpp = (2 * R) / (CADRAGE_CERCLE * minDim);
+  const z = Math.log2(78271.516 * Math.cos(rad(lat)) / mpp);
+  const f = fondCourant || { minzoom:6, maxzoom:11 };
+  return clamp(z, f.minzoom, Math.max(14, f.maxzoom + 2));
+}
+
+// Affinage de l'altitude sol dès que les tuiles MNT sont chargées dans la vue 3D.
+map3d.on('idle', () => {
+  if (!S.round || S.elevFixed) return;
+  const e = map3d.queryTerrainElevation([S.round.truth.lon, S.round.truth.lat]);
+  if (e != null && isFinite(e) && Math.abs(e - S.round.groundElev) > 2){
+    S.round.groundElev = e;
+    S.elevFixed = true;
+    updateCamera();
+  } else if (e != null){
+    S.elevFixed = true;
+  }
+});
+
+/* ---- réponse ---- */
+chart.on('click', ev => {
+  const p = { lat:ev.lngLat.lat, lon:ev.lngLat.lng };
+  if (S.mode === 'zone'){
+    S.set.zone = p; saveSettings(); drawZone(); syncForm();
+    return;
+  }
+  if (S.mode !== 'play') return;
+  S.round.guess = p;
+  showMarker(mkGuess, true, p);
+  $('btnValidate').disabled = false;
+  $('answerHint').textContent = 'Déplacez le repère si besoin, puis validez';
+});
+
+function validate(){
+  if (S.mode !== 'play' || !S.round.guess) return;
+  finishRound(S.round.guess, false);
+}
+
+function reveal(){
+  if (S.mode !== 'play') return;
+  finishRound(S.round.guess, true);
+}
+
+function finishRound(guess, revealed){
+  const r = S.round;
+  r.answered = true;
+  const secs = (Date.now() - r.t0) / 1000;
+
+  showMarker(mkTruth, true, r.truth);
+  mkHdg.setRotation(r.heading);            // orientee sur le cap suivi
+  showMarker(mkHdg, true, r.truth);
+
+  let errM = null, score = 0, inside = false;
+  if (guess && !revealed){
+    errM  = distance(guess, r.truth);
+    inside = errM <= r.radiusM;
+    score = Math.max(0, Math.round(100 * (1 - errM / r.radiusM)));
+    chart.getSource('err').setData({
+      type:'Feature', properties:{},
+      geometry:{ type:'LineString', coordinates:[[guess.lon, guess.lat], [r.truth.lon, r.truth.lat]] }
+    });
+  }
+
+  S.hist.push({ t:Date.now(), errM, score, radiusM:r.radiusM, secs, revealed:!!revealed });
+  saveHist();
+
+  // --- débriefing ---
+  const dbErr = $('dbErr'), dbV = $('dbVerdict'), db = $('debrief');
+  // Le cadre prend l'état de la réponse : vert dedans, rouge dehors, neutre si révélée.
+  db.classList.toggle('ok',  errM != null && inside);
+  db.classList.toggle('bad', errM != null && !inside);
+  if (errM == null){
+    dbErr.textContent = 'Réponse révélée';
+    dbErr.style.fontSize = '20px';
+    dbV.textContent = '';
+    $('dbMeta').textContent = 'Position vraie ' + fmtLatLon(r.truth)
+      + ' · sol ' + Math.round(r.groundElev / FT) + ' ft · cap ' + String(Math.round(r.heading)).padStart(3,'0') + '°';
+  }else{
+    const nm = errM / NM;
+    dbErr.style.fontSize = '27px';
+    dbErr.textContent = nm.toFixed(2) + ' NM';
+    dbV.textContent = (inside ? '✓ dans le cercle' : '✗ hors du cercle') + ' · ' + score + '/100';
+    $('dbMeta').textContent =
+      Math.round(errM) + ' m · erreur au ' + String(Math.round(bearingTo(r.truth, guess))).padStart(3,'0') + '°'
+      + ' · ' + secs.toFixed(0) + ' s'
+      + ' · cap ' + String(Math.round(r.heading)).padStart(3,'0') + '°'
+      + ' · position vraie ' + fmtLatLon(r.truth)
+      + ' · sol ' + Math.round(r.groundElev / FT) + ' ft';
+  }
+
+  $('btnLayer').disabled = false;
+  setMode('debrief');
+  updateChips();
+}
+
+/* ==========================================================================
+   MODES & INTERFACE
+   ========================================================================== */
+function setMode(m){
+  S.mode = m;
+  const play = m === 'play', db = m === 'debrief', zone = m === 'zone';
+  $('answerBar').style.display = play ? 'flex' : 'none';
+  $('debrief').classList.toggle('show', db);
+  if (!db) $('debrief').classList.remove('ok', 'bad');
+  $('zoneBar').style.display = zone ? 'flex' : 'none';
+  $('circleInfo').style.display = (play || db) ? 'block' : 'none';
+  $('btnValidate').disabled = !(play && S.round && S.round.guess);
+  if (play){ $('answerHint').textContent = 'Cliquez sur la carte où vous pensez être'; }
+  if (zone){ chart.setBearing(0); }
+}
+
+function updateChips(){
+  const r = S.round;
+  $('cRound').textContent = r ? r.n : '—';
+  $('cHdg').textContent   = r ? String(Math.round(r.heading)).padStart(3,'0') + '°' : '—';
+  $('cAlt').textContent   = S.set.altFt + ' ft';
+  const bascule = (S.set.altFt === ALT_BASSE) ? ALT_HAUTE : ALT_BASSE;
+  $('altTxt').innerHTML = 'Hauteur <b>' + S.set.altFt + ' ft</b> sol';
+  $('btnAlt').title     = 'Basculer à ' + bascule + ' ft sol';
+  const nm = uncertaintyM() / NM;
+  $('cRad').textContent   = nm.toFixed(2) + ' NM';
+  $('ciTxt').textContent  = ' de ' + nm.toFixed(2) + ' NM de rayon';
+
+  const done = S.hist.filter(h => h.errM != null);
+  $('cScore').textContent = done.length
+    ? Math.round(done.reduce((a, h) => a + h.score, 0) / done.length) + '/100' : '—';
+  renderStats();
+}
+
+function renderStats(){
+  const done = S.hist.filter(h => h.errM != null);
+  const box = $('statsBox');
+  if (!done.length){ box.innerHTML = '<div><span>Aucune manche validée</span></div>'; return; }
+  const errs = done.map(h => h.errM / NM).sort((a, b) => a - b);
+  const mean = errs.reduce((a, b) => a + b, 0) / errs.length;
+  const med  = errs.length % 2 ? errs[(errs.length - 1) / 2]
+                               : (errs[errs.length / 2 - 1] + errs[errs.length / 2]) / 2;
+  const inside = done.filter(h => h.errM <= h.radiusM).length;
+  const row = (k, v) => '<div><span>' + k + '</span><b>' + v + '</b></div>';
+  box.innerHTML =
+      row('Manches validées', done.length)
+    + row('Erreur moyenne',  mean.toFixed(2) + ' NM')
+    + row('Erreur médiane',  med.toFixed(2) + ' NM')
+    + row('Meilleure',       errs[0].toFixed(2) + ' NM')
+    + row('Pire',            errs[errs.length - 1].toFixed(2) + ' NM')
+    + row('Dans le cercle',  Math.round(100 * inside / done.length) + ' %')
+    + row('Révélées',        S.hist.filter(h => h.revealed).length);
+}
+
+/* ---- mode zone ---- */
+/** `fit` : recadre la carte sur la zone. On ne le fait pas à chaque clic,
+ *  sinon la carte saute sous le doigt pendant qu'on place le centre. */
+function drawZone(fit){
+  chart.getSource('zone').setData(polyFeature(circleRing(S.set.zone, S.set.zoneR * NM)));
+  showMarker(mkZone, true, S.set.zone);
+  if (!fit) return;
+  const b = new maplibregl.LngLatBounds();
+  circleRing(S.set.zone, S.set.zoneR * NM, 32).forEach(c => b.extend(c));
+  chart.fitBounds(b, { padding:60, duration:400, maxZoom:12 });
+}
+
+function enterZoneMode(){
+  closeDrawer();
+  $('intro').style.display = 'none';
+  chart.getSource('circle').setData(EMPTY);
+  chart.getSource('err').setData(EMPTY);
+  showMarker(mkGuess, false); showMarker(mkTruth, false); showMarker(mkDR, false);
+  $('zoneRange').value = S.set.zoneR;
+  $('zoneRangeVal').textContent = S.set.zoneR + ' NM';
+  setMode('zone');
+  drawZone(true);
+}
+
+function exitZoneMode(){
+  showMarker(mkZone, false);
+  chart.getSource('zone').setData(EMPTY);
+  newRound();
+}
+
+/* ---- tiroir ---- */
+function openDrawer(){ $('drawer').classList.add('open'); syncForm(); renderStats(); }
+function closeDrawer(){ $('drawer').classList.remove('open'); }
+
+function syncForm(){
+  $('inCenter').value  = fmtLatLon(S.set.zone);
+  $('inZoneR').value   = S.set.zoneR;
+  $('inGs').value      = S.set.gs;
+  $('inTime').value    = S.set.timeMin;
+  $('inRadius').value  = S.set.radiusNM;
+  $('inDirect').checked= S.set.direct;
+  $('inRadius').disabled = !S.set.direct;
+  $('inGs').disabled   = S.set.direct;
+  $('inTime').disabled = S.set.direct;
+  $('inCircleMode').value = S.set.circleMode;
+  $('inSource').value  = S.set.source;
+  $('inUrl').value     = S.set.urlTuiles;
+  $('inUrlZ').value    = S.set.urlMaxZoom;
+  $('rowUrl').hidden   = S.set.source !== 'url';
+  majInfoFond();
+  $('inAlt').value     = S.set.altFt;
+  $('inFov').value     = S.set.fov;
+  $('fovVal').textContent = Math.round(S.set.fov) + '°';
+  $('inHdg').value     = S.set.fixedHdg == null ? '' : S.set.fixedHdg;
+  const nm = uncertaintyM() / NM;
+  $('radiusOut').innerHTML = 'Rayon du cercle : <b>' + nm.toFixed(2) + ' NM</b> ('
+    + Math.round(nm * NM) + ' m)' + (S.set.direct ? '' :
+      ' — ' + S.set.timeMin + ' min à ' + S.set.gs + ' kt');
+  $('btnUp').textContent = LIBELLE_ORIENTATION[S.set.chartUp] || LIBELLE_ORIENTATION.route;
+  $('btnUp').title = 'Orientation de la carte — cliquer pour changer (route / regard / nord)';
+  $('btnUp').classList.toggle('on', S.set.chartUp !== 'north');
+}
+
+function onSettingChange(){
+  S.set.zoneR      = clamp(+$('inZoneR').value || 25, 5, 150);
+  S.set.gs         = clamp(+$('inGs').value || 130, 40, 400);
+  S.set.timeMin    = clamp(+$('inTime').value || 1, 0.25, 15);
+  S.set.radiusNM   = clamp(+$('inRadius').value || 2.17, 0.2, 40);
+  S.set.direct     = $('inDirect').checked;
+  S.set.circleMode = $('inCircleMode').value;
+  S.set.altFt      = clamp(+$('inAlt').value || 500, 200, 6000);
+  S.set.fov        = clamp(+$('inFov').value || 55, 25, 80);
+  const h = $('inHdg').value.trim();
+  S.set.fixedHdg   = h === '' ? null : clamp(+h || 0, 0, 359);
+
+  const fondAvant = JSON.stringify([S.set.source, S.set.urlTuiles, S.set.urlMaxZoom]);
+  S.set.source     = $('inSource').value;
+  S.set.urlTuiles  = $('inUrl').value.trim();
+  S.set.urlMaxZoom = clamp(+$('inUrlZ').value || 11, 6, 18);
+  if (S.set.source === 'perso' && !(S.carteInfo && S.carteInfo.raster)) S.set.source = 'ign';
+
+  const c = $('inCenter').value.split(/[ ,;]+/).map(Number).filter(n => !isNaN(n));
+  if (c.length === 2 && Math.abs(c[0]) <= 90 && Math.abs(c[1]) <= 180) S.set.zone = { lat:c[0], lon:c[1] };
+
+  if (JSON.stringify([S.set.source, S.set.urlTuiles, S.set.urlMaxZoom]) !== fondAvant) appliquerFond();
+
+  saveSettings(); syncForm(); updateChips();
+  map3d.setVerticalFieldOfView(S.set.fov);
+  if (S.round && S.mode === 'play') updateCamera();
+  if (S.mode === 'zone') drawZone(true);
+}
+
+['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inFov','inHdg','inCenter',
+ 'inSource','inUrl','inUrlZ']
+  .forEach(id => {
+    const el = $(id);
+    el.addEventListener('change', onSettingChange);
+    el.addEventListener('input', () => {
+      if (id !== 'inFov') return;                 // le champ de vision s'ajuste en direct
+      S.set.fov = clamp(+$('inFov').value, 25, 80);
+      $('fovVal').textContent = Math.round(S.set.fov) + '°';
+      map3d.setVerticalFieldOfView(S.set.fov);
+      if (S.round) updateCamera();
+    });
+  });
+
+/* ---- recherche de zone (géocodage IGN) ---- */
+let searchTimer = null;
+$('searchInput').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = $('searchInput').value.trim();
+  if (q.length < 3){ $('searchRes').innerHTML = ''; return; }
+  searchTimer = setTimeout(async () => {
+    try{
+      const url = CFG.geocode + '?q=' + encodeURIComponent(q) + '&limit=6&index=address,poi';
+      const res = await fetch(url);
+      const js  = await res.json();
+      const ul  = $('searchRes'); ul.innerHTML = '';
+      (js.features || []).forEach(f => {
+        const li = document.createElement('li');
+        const p  = f.properties || {};
+        li.innerHTML = '<span>' + (p.label || p.name || '?') + '</span>'
+                     + '<small>' + (p.context || p.postcode || '') + '</small>';
+        li.onclick = () => {
+          S.set.zone = { lat:f.geometry.coordinates[1], lon:f.geometry.coordinates[0] };
+          saveSettings(); syncForm(); ul.innerHTML = ''; $('searchInput').value = '';
+          if (S.mode === 'zone') drawZone(true); else enterZoneMode();
+        };
+        ul.appendChild(li);
+      });
+    }catch(e){ toast('Recherche indisponible'); }
+  }, 320);
+});
+
+/* ---- boutons ---- */
+$('btnNew').onclick        = () => { closeDrawer(); newRound(); };
+$('btnNext').onclick       = () => newRound();
+$('btnSettings').onclick   = () => $('drawer').classList.contains('open') ? closeDrawer() : openDrawer();
+$('btnCloseDrawer').onclick= closeDrawer;
+$('btnPickZone').onclick   = enterZoneMode;
+$('btnZoneDone').onclick   = exitZoneMode;
+$('btnValidate').onclick   = validate;
+$('btnReveal').onclick     = reveal;
+$('btnResetStats').onclick = () => { S.hist = []; saveHist(); renderStats(); updateChips(); toast('Statistiques remises à zéro'); };
+
+$('zoneRange').oninput = () => {
+  S.set.zoneR = +$('zoneRange').value;
+  $('zoneRangeVal').textContent = S.set.zoneR + ' NM';
+  saveSettings(); drawZone(false); syncForm();
+};
+$('zoneRange').onchange = () => drawZone(true);
+
+$('btnUp').onclick = () => {
+  const cycle = ['route', 'regard', 'north'];
+  S.set.chartUp = cycle[(cycle.indexOf(S.set.chartUp) + 1) % cycle.length];
+  saveSettings(); syncForm();
+  chart.easeTo({ bearing: chartBearing(), duration:400 });
+};
+
+$('btnLayer').onclick = () => {
+  const on = chart.getLayoutProperty('orthoC', 'visibility') === 'visible';
+  chart.setLayoutProperty('orthoC', 'visibility', on ? 'none' : 'visible');
+  $('btnLayer').textContent = on ? "Voir l'ortho" : 'Voir la carte OACI';
+  $('btnLayer').classList.toggle('on', !on);
+};
+
+$('btnHome').onclick = () => {
+  if (!S.round) return;
+  chart.easeTo({ center:[S.round.center.lon, S.round.center.lat],
+                 zoom: zoomForCircle(S.round.center.lat, S.round.radiusM),
+                 bearing: chartBearing(), duration:450 });
+};
+
+$('btnZoomTruth').onclick = () => {
+  if (!S.round) return;
+  chart.easeTo({ center:[S.round.truth.lon, S.round.truth.lat], zoom:13, duration:600 });
+};
+
+$('btnStart').onclick = () => { $('intro').style.display = 'none'; newRound(); };
+$('btnIntroZone').onclick = () => { enterZoneMode(); };
+
+/* ---- séparateur redimensionnable ---- */
+(function setupSplitter(){
+  const sp = $('splitter'), stage = $('stage'), pane = $('pane3d');
+  let dragging = false;
+  sp.addEventListener('pointerdown', e => {
+    dragging = true; e.preventDefault();
+    try{ sp.setPointerCapture(e.pointerId); }catch(err){}
+  });
+  sp.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const r = stage.getBoundingClientRect();
+    if (!r.width || !r.height) return;              // fenêtre réduite : rien à redimensionner
+    const vertical = getComputedStyle(stage).flexDirection === 'column';
+    const pct = vertical ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width;
+    if (!isFinite(pct)) return;
+    pane.style.flexBasis = (clamp(pct, 0.15, 0.85) * 100).toFixed(1) + '%';
+    map3d.resize(); chart.resize();
+  });
+  sp.addEventListener('pointerup', e => {
+    dragging = false;
+    try{ sp.releasePointerCapture(e.pointerId); }catch(err){}
+  });
+})();
+
+window.addEventListener('resize', () => { map3d.resize(); chart.resize(); });
+
+/* ---- graduations de la rose ---- */
+(function buildRose(){
+  let s = '';
+  for (let a = 0; a < 360; a += 10){
+    const major = a % 30 === 0;
+    const r1 = major ? 36 : 39, r2 = 43;
+    const x1 = Math.sin(rad(a)) * r1, y1 = -Math.cos(rad(a)) * r1;
+    const x2 = Math.sin(rad(a)) * r2, y2 = -Math.cos(rad(a)) * r2;
+    s += '<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1)
+       + '" y2="' + y2.toFixed(1) + '" stroke="' + (major ? '#8a97ad' : '#2b3a52')
+       + '" stroke-width="' + (major ? 1.4 : 1) + '"/>';
+  }
+  $('roseTicks').innerHTML = s;
+})();
+
+/* ---- démarrage ---- */
+loadState();
+syncForm();
+updateChips();
+map3d.setVerticalFieldOfView(S.set.fov);
+setMode('intro');
+</script>
+</body>
+</html>
