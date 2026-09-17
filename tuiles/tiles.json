@@ -1,0 +1,13 @@
+{
+  "nom": "dia-mercator_france_lfc",
+  "gabarit": "{z}/{x}/{y}.png",
+  "minzoom": 6,
+  "maxzoom": 11,
+  "bounds": [
+    -5.44533302,
+    41.097867569341965,
+    9.89364097902344,
+    51.15212166
+  ],
+  "fichiers": 7407
+}
