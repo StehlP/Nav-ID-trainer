@@ -86,12 +86,6 @@
   #lookInfo{top:10px;left:10px}
   #lookInfo .big{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--cyan)}
   #lookInfo .sub{color:var(--txt2);font-size:11.5px;margin-top:3px;font-family:var(--mono)}
-  #chronoBox{top:10px;left:50%;transform:translateX(-50%);text-align:center;padding:7px 16px}
-  #chronoBox .ct-l{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt2)}
-  #chronoBox .ct-v{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--cyan);line-height:1.15}
-  #chronoBox .ct-s{font-family:var(--mono);font-size:11px;color:var(--txt3)}
-  #hint3d{top:10px;right:10px;max-width:196px;color:var(--txt3);font-size:11px;line-height:1.5}
-  #hint3d b{color:var(--txt2)}
   #rose{bottom:12px;left:12px;width:104px;height:104px;cursor:pointer}
   #rose:hover #roseHalo{stroke:var(--cyan);stroke-width:1.6}
 
@@ -253,18 +247,8 @@
     <div id="map3d"></div>
 
     <div class="ov card" id="lookInfo">
-      <div class="big">Regard <span id="lkClock">12 h</span> · <span id="lkAz">—</span></div>
+      <div class="big">Regard <span id="lkClock">12 h</span> · <span id="lkAz">—</span><span id="lkChronoWrap" hidden> · Chrono <b id="lkChrono">—</b></span></div>
       <div class="sub">Cap avion <span id="lkHdg">—</span> · site <span id="lkSite">—</span> · champ <span id="lkFov">—</span></div>
-    </div>
-
-    <div class="ov card" id="chronoBox" hidden>
-      <div class="ct-l">Chrono</div>
-      <div class="ct-v" id="chronoVal">—</div>
-      <div class="ct-s" id="chronoSub"></div>
-    </div>
-
-    <div class="ov card" id="hint3d">
-      Glissez à la souris pour regarder autour · molette&nbsp;= zoom optique · <b>R</b> ou clic sur la rose&nbsp;= recentrer dans l'axe
     </div>
 
     <svg class="ov i" id="rose" viewBox="-50 -50 100 100">
@@ -360,6 +344,8 @@
           <input type="number" id="inLegMin" min="6" max="60" step="1"> <span class="unit">min</span></div>
         <div class="row"><span>Top toutes les</span>
           <input type="number" id="inTop" min="1" max="10" step="1"> <span class="unit">min</span></div>
+        <div class="row"><span>Balayage droite/gauche</span>
+          <input type="number" id="inSweep" min="20" max="175" step="5"> <span class="unit">°</span></div>
         <div class="row"><span>Tracer le cercle</span><input type="checkbox" id="inShowCircle"></div>
         <p class="muted">Le cercle d'incertitude n'est pas tracé par défaut : à vous de placer
           votre position estimée d'après le chrono et le minutage de la branche.</p>
@@ -626,7 +612,7 @@ const DEFAULTS = {
   altFt:500, fov:55, chartUp:'route',
   source:'url', urlMaxZoom:11,
   urlTuiles:'https://StehlP.github.io/Nav-ID-trainer/tuiles/{z}/{x}/{y}.png',
-  mode:'cercle', legMin:18, topMin:1, showCircle:false,
+  mode:'cercle', legMin:18, topMin:1, showCircle:false, sweepMax:110,
   fixedHdg:null
 };
 
@@ -899,12 +885,8 @@ function updateLookHud(){
   $('lkSite').textContent  = Math.round(S.view.site) + '°';
   $('lkFov').textContent   = Math.round(S.set.fov) + '°';
   const branche = S.set.mode === 'branche' && r.leg;
-  $('chronoBox').hidden = !branche;
-  if (branche){
-    $('chronoVal').textContent = mmss(r.chrono);
-    $('chronoSub').textContent = 'Rv ' + String(Math.round(r.leg.route)).padStart(3,'0')
-                               + '°  ·  ' + r.leg.gs + ' kt  ·  branche ' + r.leg.dureeMin + ' min';
-  }
+  $('lkChronoWrap').hidden = !branche;
+  if (branche) $('lkChrono').textContent = mmss(r.chrono);
   $('roseRing').setAttribute('transform', 'rotate(' + (-r.heading) + ')');
   $('viewCone').setAttribute('transform', 'rotate(' + rel + ')');
 }
@@ -1173,7 +1155,7 @@ function dessinerBranche(){
 /** Libertes de la vue 3D selon le mode : en branche on ne balaie que le secteur
  *  avant, site fige, comme un regard porte dehors depuis le poste. */
 function contraintesVue(){
-  return S.set.mode === 'branche' ? { relMax:60, siteFixe:4 }
+  return S.set.mode === 'branche' ? { relMax:S.set.sweepMax, siteFixe:4 }
                                   : { relMax:180, siteFixe:null };
 }
 
@@ -1424,11 +1406,6 @@ function updateChips(){
     $('circleInfo').innerHTML =
       'Vous êtes quelque part dans le <b>cercle d’incertitude</b> de '
       + nm.toFixed(2) + ' NM de rayon.';
-  $('hint3d').innerHTML = (S.set.mode === 'branche')
-      ? 'Balayage limité à <b>±60°</b> de part et d’autre de l’axe, site figé à 4° — '
-      + 'comme un regard porté dehors. <b>R</b> ou clic sur la rose pour revenir dans l’axe.'
-      : 'Glissez à la souris pour regarder autour · molette = zoom optique · '
-      + '<b>R</b> ou clic sur la rose = recentrer dans l’axe';
 
   const done = S.hist.filter(h => h.errM != null);
   $('cScore').textContent = done.length
@@ -1504,6 +1481,7 @@ function syncForm(){
   $('inMode').value        = S.set.mode;
   $('inLegMin').value      = S.set.legMin;
   $('inTop').value         = S.set.topMin;
+  $('inSweep').value       = S.set.sweepMax;
   $('inShowCircle').checked= S.set.showCircle;
   $('grpBranche').hidden   = S.set.mode !== 'branche';
   $('inSource').value  = S.set.source;
@@ -1540,6 +1518,7 @@ function onSettingChange(){
   S.set.mode       = $('inMode').value;
   S.set.legMin     = clamp(+$('inLegMin').value || 18, 6, 60);
   S.set.topMin     = clamp(+$('inTop').value || 1, 1, 10);
+  S.set.sweepMax   = clamp(+$('inSweep').value || 110, 20, 175);
   S.set.showCircle = $('inShowCircle').checked;
 
   const fondAvant = JSON.stringify([S.set.source, S.set.urlTuiles, S.set.urlMaxZoom]);
@@ -1564,7 +1543,7 @@ function onSettingChange(){
 }
 
 ['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inFov','inHdg','inCenter',
- 'inSource','inUrl','inUrlZ','inMode','inLegMin','inTop','inShowCircle']
+ 'inSource','inUrl','inUrlZ','inMode','inLegMin','inTop','inSweep','inShowCircle']
   .forEach(id => {
     const el = $(id);
     el.addEventListener('change', onSettingChange);
