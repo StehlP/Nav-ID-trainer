@@ -100,11 +100,14 @@
   #btnAlt:hover{border-color:var(--cyan);color:var(--cyan);background:rgba(18,24,38,.96)}
   #btnAlt:hover svg{opacity:1}
 
+  #incertitudeInfo{top:10px;left:10px;font-size:12px;color:var(--txt2);padding:7px 11px}
+  #incertitudeInfo b{font-family:var(--mono);color:var(--cyan);font-weight:600;font-size:13px}
   #chartTools{top:10px;right:10px;display:flex;flex-direction:column;gap:5px;align-items:flex-end}
   #chartTools .btn{padding:5px 9px;font-size:12px;background:rgba(18,24,38,.88);backdrop-filter:blur(6px)}
   #chartTools .btn:hover{border-color:var(--cyan);color:var(--cyan)}
   #btnHome{display:flex;align-items:center;justify-content:center;padding:6px}
   #btnHome svg{display:block}
+  #btnEchelle{font-family:var(--mono);letter-spacing:.02em}
   #answerBar{bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center}
 
   /* ---------- bandeau mode zone ---------- */
@@ -119,18 +122,17 @@
   /* ---------- débriefing ---------- */
   #debrief{
     position:absolute;z-index:6;left:12px;right:12px;bottom:12px;display:none;
-    background:rgba(18,24,38,.94);backdrop-filter:blur(8px);
+    background:rgba(18,24,38,.985);backdrop-filter:blur(10px);
     border:1px solid var(--line);border-radius:10px;padding:14px 16px;
   }
   #debrief.show{display:block}
-  #debrief.ok{border-color:var(--green);background:rgba(58,209,122,.09)}
-  #debrief.bad{border-color:var(--red);background:rgba(239,83,80,.09)}
+  #debrief.ok{border-color:var(--green);background:rgba(23,46,48,.985)}
+  #debrief.bad{border-color:var(--red);background:rgba(45,31,43,.985)}
   #dbTop{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
   #dbErr{font-family:var(--mono);font-size:27px;font-weight:600;color:var(--cyan)}
   #dbVerdict{font-weight:600;font-size:13px}
   #debrief.ok #dbVerdict{color:var(--green)}
   #debrief.bad #dbVerdict{color:#ff9a97}
-  #dbMeta{font-family:var(--mono);color:var(--txt2);font-size:12px;margin-top:7px;line-height:1.6}
   #dbActions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 
   /* ---------- tiroir réglages ---------- */
@@ -196,6 +198,15 @@
     color:var(--cyan);text-align:center;
   }
   #introOrdre span{color:var(--txt3);font-weight:400;font-size:12px;margin:0 4px}
+
+  /* ---------- réglette d'étalonnage ---------- */
+  #reglette{padding:10px 0 4px}
+  #regletteBar{
+    /* 50mm en CSS est défini exactement comme 96×50/25,4 px : c'est notre étalon.
+       (Pas 100 mm : ça déborderait du tiroir, dont la largeur est plus petite.) */
+    width:50mm;height:14px;background:var(--cyan);border-radius:2px;
+    background-image:repeating-linear-gradient(90deg, rgba(11,15,23,.55) 0 1px, transparent 1px 20%);
+  }
 
   /* ---------- marqueurs carte ---------- */
   /* MapLibre place et centre lui-même le marqueur : .maplibregl-marker impose
@@ -289,6 +300,8 @@
   <section id="paneChart">
     <div id="mapChart"></div>
 
+    <div class="ov card" id="incertitudeInfo">Cercle d'incertitude <b>—</b></div>
+
     <div class="ov i" id="chartTools">
       <button class="btn on" id="btnUp" title="Orientation de la carte">Route en haut</button>
       <button class="btn" id="btnLayer" title="Disponible au débriefing" disabled>Voir l'ortho</button>
@@ -298,6 +311,7 @@
           <path d="M1.8 7.2 L8 2 L14.2 7.2"/><path d="M3.4 6.6 V13.6 H12.6 V6.6"/>
         </svg>
       </button>
+      <button class="btn" id="btnEchelle" title="Afficher la carte à son échelle réelle : 1 cm à l'écran = 5 km au sol">1:500k</button>
     </div>
 
     <div class="ov i" id="answerBar">
@@ -316,7 +330,6 @@
         <div id="dbErr">—</div>
         <div id="dbVerdict"></div>
       </div>
-      <div id="dbMeta"></div>
       <div id="dbActions">
         <button class="btn primary" id="btnNext">Manche suivante</button>
         <button class="btn" id="btnZoomTruth">Zoomer sur la position vraie</button>
@@ -398,9 +411,27 @@
     <div class="grp">
       <h3>Vol</h3>
       <div class="row"><span>Hauteur sol</span><input type="number" id="inAlt" min="200" max="6000" step="100"> <span class="unit">ft</span></div>
+      <div class="row"><span>Comptée au-dessus</span>
+        <select id="inHauteurRef">
+          <option value="point">du point survolé</option>
+          <option value="sommet">du plus haut dans 150 m</option>
+        </select>
+      </div>
       <div class="row"><span>Champ de vision</span><input type="range" id="inFov" min="25" max="80" step="1"> <b id="fovVal"></b></div>
       <div class="row"><span>Cap imposé</span><input type="number" id="inHdg" min="0" max="359" step="1" placeholder="aléatoire"></div>
       <p class="muted">Laissez le cap vide pour un tirage aléatoire à chaque manche.</p>
+    </div>
+
+    <div class="grp">
+      <h3>Étalonnage de l'échelle réelle</h3>
+      <p class="muted">Le bouton <b>1:500k</b> suppose qu'un pixel d'écran vaut 1/96 de pouce —
+        juste sur un écran réglé normalement, mais à quelques % près selon la dalle. Posez une
+        règle sur le trait ci-dessous et indiquez ce qu'elle mesure vraiment.</p>
+      <div id="reglette"><div id="regletteBar"></div></div>
+      <div class="row" style="margin-top:8px"><span>Longueur mesurée</span>
+        <input type="number" id="inEtalon" min="30" max="75" step="0.5"> <span class="unit">mm</span></div>
+      <button class="btn full" id="btnValiderEtalon">Valider l'étalonnage</button>
+      <div class="readout" id="etalonInfo" style="margin-top:8px"></div>
     </div>
 
     <div class="grp">
@@ -606,14 +637,15 @@ async function demElevation(lat, lon, z = CFG.demZoom){
 const ALT_BASSE = 500, ALT_HAUTE = 1500;   // hauteurs sol de la bascule rapide
 
 const DEFAULTS = {
-  zone:{ lat:44.9226, lon:4.9218 },   // Valence — relief, fleuve, axes, villages
-  zoneR:25,                            // NM
+  zone:{ lat:44.3701, lon:4.9793 },   // Valréas — vallée du Rhône, Ventoux, Baronnies, Ardèche
+  zoneR:60,                            // NM
+  zoneV:2,                             // version de la zone par défaut (voir loadState)
   gs:130, timeMin:1, radiusNM:2.17, direct:false,
   circleMode:'dr',
-  altFt:500, fov:55, chartUp:'route',
+  altFt:500, fov:55, chartUp:'route', hauteurRef:'point',
   source:'url', urlMaxZoom:11,
   urlTuiles:'https://StehlP.github.io/Nav-ID-trainer/tuiles/{z}/{x}/{y}.png',
-  mode:'cercle', legMin:18, showCircle:false, sweepMax:110,
+  mode:'cercle', legMin:18, showCircle:false, sweepMax:110, echelleCal:1,
   fixedHdg:null
 };
 
@@ -651,6 +683,16 @@ function loadState(){
     const s = JSON.parse(localStorage.getItem(LS_SET) || 'null');
     if (s) Object.assign(S.set, DEFAULTS, s);
     if (!S.set.urlTuiles) S.set.urlTuiles = DEFAULTS.urlTuiles;   // reglages d'avant cette adresse
+    // La zone par défaut a changé : on remplace celle qui traîne dans les
+    // réglages enregistrés, une seule fois, sinon le nouveau défaut ne se
+    // verrait jamais. Une zone choisie après coup est conservée normalement.
+    // On interroge l'objet enregistré brut : après la fusion ci-dessus,
+    // S.set.zoneV vaut déjà la version courante même pour d'anciens réglages.
+    if (s && s.zoneV !== DEFAULTS.zoneV){
+      S.set.zone  = DEFAULTS.zone;
+      S.set.zoneR = DEFAULTS.zoneR;
+      S.set.zoneV = DEFAULTS.zoneV;
+    }
     const h = JSON.parse(localStorage.getItem(LS_HIST) || 'null');
     if (Array.isArray(h)) S.hist = h;
   }catch(e){ /* réglages illisibles : on repart des valeurs par défaut */ }
@@ -662,6 +704,12 @@ function saveHist(){ try{ localStorage.setItem(LS_HIST, JSON.stringify(S.hist.sl
 function uncertaintyM(){
   const nm = S.set.direct ? S.set.radiusNM : (S.set.gs * S.set.timeMin / 60);
   return clamp(nm, 0.2, 60) * NM;
+}
+
+/** Le même rayon, exprimé en minutes de vol — la grandeur avec laquelle on
+ *  raisonne réellement. En saisie directe d'un rayon, on le reconvertit. */
+function incertitudeMinutes(){
+  return uncertaintyM() / NM / S.set.gs * 60;
 }
 
 /* ==========================================================================
@@ -750,17 +798,12 @@ function initChartLayers(){
   chart.addSource('leg',  { type:'geojson', data:EMPTY });
   chart.addSource('tops', { type:'geojson', data:EMPTY });
   // Trait de nav facon crayon : noir direct, sans halo clair.
-  // Épaisseur des traits à l'échelle du terrain, comme les chiffres de minutage
-  // (doublement par niveau de zoom, référence au zoom 11) plutôt qu'à une
-  // épaisseur fixe à l'écran — l'effet recherché d'un tracé fait à la main sur
-  // la carte, qui grossit avec elle. `interpolate`/`exponential 2` tient lieu
-  // de clamp() : hors des bornes indiquées, la valeur reste plate.
+  // Épaisseurs données au sol (voir largeurAuSol) : le trait grossit avec la
+  // carte comme un vrai trait de crayon, sans jamais se figer.
   chart.addLayer({ id:'leg-line', type:'line', source:'leg',
-    paint:{ 'line-color':'#10161c',
-            'line-width':['interpolate', ['exponential', 2], ['zoom'], 9.56, 1.4, 11, 3.8, 12.32, 9.5] } });
+    paint:{ 'line-color':'#10161c', 'line-width':largeurAuSol(TRAIT_M) } });
   chart.addLayer({ id:'tops-line', type:'line', source:'tops',
-    paint:{ 'line-color':'#10161c',
-            'line-width':['interpolate', ['exponential', 2], ['zoom'], 9.62, 1.0, 11, 2.6, 12.32, 6.5] } });
+    paint:{ 'line-color':'#10161c', 'line-width':largeurAuSol(TOPS_M) } });
 
   chart.addLayer({ id:'circle-fill', type:'fill', source:'circle',
     paint:{ 'fill-color':'#d0006f', 'fill-opacity':0.07 } });
@@ -976,6 +1019,60 @@ function toast(msg, ms = 2200){
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
 }
 
+/* ---------------------------------------------------------------------------
+   Altitude de référence sous l'avion
+   ---------------------------------------------------------------------------
+   Deux façons de compter la hauteur sol :
+     'point'  — le terrain à l'aplomb, littéral ;
+     'sommet' — le point le plus haut dans un rayon de 150 m, ce qu'on applique
+                réellement en vol : la hauteur de survol se compte sur
+                l'obstacle, pas sur le creux qu'on a sous le ventre.
+   Le motif d'échantillonnage est un quadrillage de 25 m sur le disque, calculé
+   une fois pour toutes puis réutilisé (≈130 points).
+   --------------------------------------------------------------------------- */
+const SOMMET_RAYON = 150;    // m
+const SOMMET_PAS   = 25;     // m
+const SOMMET_ZOOM  = 14;     // MNT le plus fin disponible : ~7 m/px
+
+const MOTIF_SOMMET = (() => {
+  const pts = [];
+  for (let dx = -SOMMET_RAYON; dx <= SOMMET_RAYON; dx += SOMMET_PAS)
+    for (let dy = -SOMMET_RAYON; dy <= SOMMET_RAYON; dy += SOMMET_PAS){
+      const d = Math.hypot(dx, dy);
+      if (d > 0 && d <= SOMMET_RAYON)
+        pts.push({ brg: norm360(deg(Math.atan2(dx, dy))), d });
+    }
+  return pts;
+})();
+
+/** Altitude de référence, lue dans les tuiles MNT (à la génération d'une manche). */
+async function altitudeReference(lat, lon){
+  const direct = await demElevation(lat, lon, SOMMET_ZOOM);
+  if (S.set.hauteurRef !== 'sommet' || direct == null) return direct;
+  let max = direct;
+  for (const p of MOTIF_SOMMET){
+    const q = destPoint(lat, lon, p.brg, p.d);
+    const e = await demElevation(q.lat, q.lon, SOMMET_ZOOM);
+    if (e != null && e > max) max = e;
+  }
+  return max;
+}
+
+/** Même chose, mais lue dans le relief déjà chargé par la vue 3D : plus fidèle
+ *  à ce qui est réellement affiché, et synchrone. */
+function altitudeReferenceTerrain(lat, lon){
+  const direct = map3d.queryTerrainElevation([lon, lat]);
+  if (direct == null || !isFinite(direct)) return null;
+  if (S.set.hauteurRef !== 'sommet') return direct;
+  let max = direct;
+  for (const p of MOTIF_SOMMET){
+    const q = destPoint(lat, lon, p.brg, p.d);
+    const e = map3d.queryTerrainElevation([q.lon, q.lat]);
+    if (e != null && isFinite(e) && e > max) max = e;
+  }
+  return max;
+}
+
 /** Tire une position vraie valide : dans l'emprise OACI, sur terre. */
 async function pickTruth(){
   const zone = S.set.zone, zr = S.set.zoneR * NM;
@@ -984,7 +1081,7 @@ async function pickTruth(){
     if (!inBbox(p)) continue;
     const e = await demElevation(p.lat, p.lon);
     if (e == null || e < 1) continue;            // mer, ou MNT indisponible
-    return { pos:p, elev:e };
+    return { pos:p, elev: (await altitudeReference(p.lat, p.lon)) ?? e };
   }
   return null;
 }
@@ -1026,7 +1123,8 @@ async function genererBranche(){
     if (!inBbox(truth)) continue;
     const e = await demElevation(truth.lat, truth.lon);
     if (e == null || e < 1) continue;
-    return { truth, groundElev:e, heading:route, center:centre, radiusM:R, leg, chrono };
+    const ref = (await altitudeReference(truth.lat, truth.lon)) ?? e;
+    return { truth, groundElev:ref, heading:route, center:centre, radiusM:R, leg, chrono };
   }
   return null;
 }
@@ -1112,10 +1210,36 @@ function mmss(min){
 // tiré au sort à la génération). Minute impaire -> trait court ; minute paire
 // -> trait deux fois plus long, complété par le numéro de la minute en texte
 // nu, planté juste au-delà de la pointe du trait.
-const TOP_ECART   = 0.10 * NM;   // espace laissé entre le trait de branche et le repère
-const TOP_COURT   = 0.30 * NM;   // longueur d'un repère de minute impaire
+/* Tout le tracé de nav — trait, tirets, chiffres, ronds — est dimensionné en
+   MÈTRES AU SOL, comme un trait de crayon posé sur la carte papier. Rien n'est
+   exprimé en pixels écran : zoomer la carte grossit le tracé exactement comme
+   le fond, épaisseur comprise, sans aucun palier. */
+const LAT_ECHELLE = 46;                                        // milieu de la France
+const MPP_Z0 = 78271.516 * Math.cos(rad(LAT_ECHELLE));         // mètres par pixel au zoom 0
+const pxAuSol = (metres, zoom) => metres * Math.pow(2, zoom) / MPP_Z0;
+
+/** Expression MapLibre tenant une largeur constante au sol. Deux bornes qui
+ *  débordent largement la plage de zoom de la carte (6 à 14), donc jamais de
+ *  palier dans la zone utile ; l'interpolation exponentielle de base 2 donne
+ *  le doublement exact à chaque niveau. */
+function largeurAuSol(metres){
+  return ['interpolate', ['exponential', 2], ['zoom'],
+          5, pxAuSol(metres, 5), 16, pxAuSol(metres, 16)];
+}
+
+const TRAIT_M = 400;    // épaisseur du trait de branche
+const TOPS_M  = 275;    // épaisseur des tirets de minutage
+const LBL_M   = 1900;   // hauteur des chiffres de minutage
+const PT_M    = 1150;   // diamètre des ronds de départ et d'arrivée
+
+// Le trait de branche est épais (TRAIT_M) : son rendu déborde de TRAIT_M/2 de
+// chaque côté de la géométrie. Un écart de tirets plus petit que ça les fait
+// donc démarrer visuellement dans le trait, même si les deux géométries ne se
+// touchent pas. On part nettement au-delà de ce rayon visuel.
+const TOP_ECART   = TRAIT_M + 200;      // espace laissé entre le trait de branche et le repère
+const TOP_COURT   = 0.30 * NM;          // longueur d'un repère de minute impaire
 const TOP_LONG    = TOP_COURT * 2;
-const TOP_LABEL_MARGE = 0.24 * NM;   // espace entre la pointe du tiret et le chiffre
+const TOP_LABEL_MARGE = 0.65 * NM;      // espace entre la pointe du tiret et le chiffre
 
 /** Traits de minutage le long de la branche : un par minute entière. */
 function topsDeBranche(leg){
@@ -1137,20 +1261,24 @@ function topsDeBranche(leg){
 
 let etiquettes = [];                 // marqueurs de minutage, recrees a chaque manche
 
-/** Taille des chiffres de minutage, à l'échelle du terrain plutôt qu'à celle
- *  de l'écran : elle double à chaque niveau de zoom, exactement comme la
- *  résolution au sol d'une tuile — un marqueur DOM ne le fait pas de
- *  lui-même (MapLibre ne pilote que sa position/rotation), on l'ajuste donc
- *  à la main sur chaque 'zoom', avec des bornes pour rester lisible. */
-const LBL_ZOOM_REF = 11, LBL_PX_REF = 24, LBL_PX_MIN = 14, LBL_PX_MAX = 60;
-function tailleEtiquette(zoom){
-  return clamp(LBL_PX_REF * Math.pow(2, zoom - LBL_ZOOM_REF), LBL_PX_MIN, LBL_PX_MAX);
-}
+/** Chiffres et ronds : eux aussi dimensionnés au sol. MapLibre ne pilote que
+ *  la position et la rotation d'un marqueur DOM, jamais sa taille — on la
+ *  recalcule donc à chaque 'zoom'. Aucune borne : la lisibilité se règle en
+ *  zoomant, comme sur une carte papier qu'on approche des yeux. */
+const tailleEtiquette = zoom => pxAuSol(LBL_M, zoom);
+const taillePointBranche = zoom => pxAuSol(PT_M, zoom);
+
 function majEchelleEtiquettes(){
-  const px = tailleEtiquette(chart.getZoom()) + 'px';
+  const z = chart.getZoom();
+  const pxTexte = tailleEtiquette(z) + 'px';
+  const pxRond  = taillePointBranche(z) + 'px';
   for (const m of etiquettes){
     const el = m.getElement();
-    if (el.classList.contains('lbl')) el.style.fontSize = px;
+    if (el.classList.contains('lbl')){
+      el.style.fontSize = pxTexte;
+    }else if (el.classList.contains('mk-leg-pt')){
+      el.style.width = pxRond; el.style.height = pxRond;
+    }
   }
 }
 chart.on('zoom', majEchelleEtiquettes);
@@ -1172,6 +1300,8 @@ function etiquette(texte, route){
 function pointBranche(){
   const el = document.createElement('div');
   el.className = 'mk-leg-pt';
+  const px = taillePointBranche(chart.getZoom()) + 'px';
+  el.style.width = px; el.style.height = px;
   return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
 }
 
@@ -1308,29 +1438,56 @@ function zoomForCircle(lat, R){
   return clamp(z, f.minzoom, Math.max(14, f.maxzoom + 2));
 }
 
+/* Échelle réelle : zoom auquel l'écran restitue le 1/500 000 de la carte
+   papier, soit 1 cm affiché = 5 km au sol. On s'appuie sur la convention CSS
+   d'un pixel = 1/96 de pouce, la seule référence physique dont dispose une
+   page web ; c'est juste sur un écran réglé normalement, à quelques pour cent
+   près selon la dalle et le zoom du navigateur. */
+const ECHELLE_CARTE = 500000;
+// Mètres par pixel CSS en supposant la convention 96 px/pouce — juste à
+// quelques % près selon la dalle et le zoom du navigateur, d'où l'étalonnage.
+const M_PAR_PX_ECHELLE_NOMINAL = (25.4 / 96) / 1000 * ECHELLE_CARTE;   // 132,29 m par pixel
+
+const ETALON_MM = 50;   // longueur nominale de la réglette d'étalonnage (voir CSS #regletteBar)
+
+function mParPxEchelle(){
+  return M_PAR_PX_ECHELLE_NOMINAL * (S.set.echelleCal || 1);
+}
+
+function zoomEchelleReelle(lat){
+  return Math.log2(78271.516 * Math.cos(rad(lat)) / mParPxEchelle());
+}
+
+/** Allume le bouton quand la carte est effectivement à l'échelle. */
+function majBoutonEchelle(){
+  const vise = zoomEchelleReelle(chart.getCenter().lat);
+  $('btnEchelle').classList.toggle('on', Math.abs(chart.getZoom() - vise) < 0.02);
+}
+chart.on('zoom', majBoutonEchelle);
+chart.on('move', majBoutonEchelle);
+
 /** Recadre la carte sur la manche en cours : le cercle d'incertitude en mode
  *  cercle, ou la totalité de la branche (A à B) en mode chrono — quelle que
  *  soit son orientation. fitBounds() gère nativement la rotation (bearing) en
  *  recalculant le cadrage autour du rectangle englobant tourné : une branche
  *  est-ouest ou une branche nord-sud tiennent donc pareillement à l'écran. */
+/** Cadrage par défaut d'une manche : la carte s'ouvre directement à l'échelle
+ *  réelle du 1/500 000, comme si on dépliait la vraie carte papier — pas un
+ *  cadrage ajusté à la taille du cercle ou de la branche. Centre : celui du
+ *  cercle en mode cercle, le milieu (en temps) de la branche en mode chrono. */
 function cadrerManche(anime){
   const r = S.round; if (!r) return;
   const bearing = chartBearing();
   const opts = anime ? { duration:450 } : { duration:0 };
-  if (r.leg){
-    const b = new maplibregl.LngLatBounds([r.leg.a.lon, r.leg.a.lat], [r.leg.a.lon, r.leg.a.lat]);
-    b.extend([r.leg.b.lon, r.leg.b.lat]);
-    chart.fitBounds(b, Object.assign({ bearing, padding:74, maxZoom:14 }, opts));
-  }else{
-    chart.easeTo(Object.assign({ center:[r.center.lon, r.center.lat],
-                                 zoom:zoomForCircle(r.center.lat, r.radiusM), bearing }, opts));
-  }
+  const centre = r.leg ? pointSurBranche(r.leg, r.leg.dureeMin / 2) : r.center;
+  chart.easeTo(Object.assign({ center:[centre.lon, centre.lat],
+                               zoom:zoomEchelleReelle(centre.lat), bearing }, opts));
 }
 
 // Affinage de l'altitude sol dès que les tuiles MNT sont chargées dans la vue 3D.
 map3d.on('idle', () => {
   if (!S.round || S.elevFixed) return;
-  const e = map3d.queryTerrainElevation([S.round.truth.lon, S.round.truth.lat]);
+  const e = altitudeReferenceTerrain(S.round.truth.lat, S.round.truth.lon);
   if (e != null && isFinite(e) && Math.abs(e - S.round.groundElev) > 2){
     S.round.groundElev = e;
     S.elevFixed = true;
@@ -1395,20 +1552,11 @@ function finishRound(guess, revealed){
     dbErr.textContent = 'Réponse révélée';
     dbErr.style.fontSize = '20px';
     dbV.textContent = '';
-    $('dbMeta').textContent = 'Position vraie ' + fmtLatLon(r.truth)
-      + ' · sol ' + Math.round(r.groundElev / FT) + ' ft · cap ' + String(Math.round(r.heading)).padStart(3,'0') + '°';
   }else{
     const nm = errM / NM;
     dbErr.style.fontSize = '27px';
     dbErr.textContent = nm.toFixed(2) + ' NM';
     dbV.textContent = (inside ? '✓ dans le cercle' : '✗ hors du cercle') + ' · ' + score + '/100';
-    $('dbMeta').textContent =
-      Math.round(errM) + ' m · erreur au ' + String(Math.round(bearingTo(r.truth, guess))).padStart(3,'0') + '°'
-      + ' · ' + secs.toFixed(0) + ' s'
-      + (r.leg ? ' · chrono ' + mmss(r.chrono) + ' · Rv ' + String(Math.round(r.leg.route)).padStart(3,'0') + '°'
-                : ' · cap ' + String(Math.round(r.heading)).padStart(3,'0') + '°')
-      + ' · position vraie ' + fmtLatLon(r.truth)
-      + ' · sol ' + Math.round(r.groundElev / FT) + ' ft';
   }
 
   $('btnLayer').disabled = false;
@@ -1426,6 +1574,7 @@ function setMode(m){
   $('debrief').classList.toggle('show', db);
   if (!db) $('debrief').classList.remove('ok', 'bad');
   $('zoneBar').style.display = zone ? 'flex' : 'none';
+  $('incertitudeInfo').style.display = (play || db) ? 'block' : 'none';
   $('btnValidate').disabled = !(play && S.round && S.round.guess);
   if (zone){ chart.setBearing(0); }
 }
@@ -1436,10 +1585,15 @@ function updateChips(){
   $('cHdg').textContent   = r ? String(Math.round(r.heading)).padStart(3,'0') + '°' : '—';
   $('cAlt').textContent   = S.set.altFt + ' ft';
   const bascule = (S.set.altFt === ALT_BASSE) ? ALT_HAUTE : ALT_BASSE;
-  $('altTxt').innerHTML = 'Hauteur <b>' + S.set.altFt + ' ft</b> sol';
+  $('altTxt').innerHTML = 'Hauteur <b>' + S.set.altFt + ' ft</b> '
+                        + (S.set.hauteurRef === 'sommet' ? '/ sommet' : 'sol');
   $('btnAlt').title     = 'Basculer à ' + bascule + ' ft sol';
   const nm = uncertaintyM() / NM;
   $('cRad').textContent   = nm.toFixed(2) + ' NM';
+  const min = incertitudeMinutes();
+  const minTxt = (Math.abs(min - Math.round(min)) < 0.05 ? String(Math.round(min))
+                                                         : min.toFixed(1).replace('.', ','));
+  $('incertitudeInfo').innerHTML = 'Cercle d\'incertitude <b>' + minTxt + ' min</b>';
 
   const done = S.hist.filter(h => h.errM != null);
   $('cScore').textContent = done.length
@@ -1516,6 +1670,13 @@ function syncForm(){
   $('inLegMin').value      = S.set.legMin;
   $('inSweep').value       = S.set.sweepMax;
   $('inShowCircle').checked= S.set.showCircle;
+  $('inEtalon').value      = (ETALON_MM * S.set.echelleCal).toFixed(1);
+  $('etalonInfo').innerHTML = (Math.abs(S.set.echelleCal - 1) < 0.001)
+      ? 'Aucun étalonnage appliqué (facteur <b>1,00</b>).'
+      : 'Facteur appliqué : <b>' + S.set.echelleCal.toFixed(3) + '</b> · '
+        + (S.set.echelleCal > 1 ? 'la carte s’affichera un peu plus petite'
+                                 : 'la carte s’affichera un peu plus grande')
+        + ' qu’avec la convention 96 px/pouce.';
   $('grpBranche').hidden   = S.set.mode !== 'branche';
   $('inSource').value  = S.set.source;
   $('inUrl').value     = S.set.urlTuiles;
@@ -1523,6 +1684,7 @@ function syncForm(){
   $('rowUrl').hidden   = S.set.source !== 'url';
   majInfoFond();
   $('inAlt').value     = S.set.altFt;
+  $('inHauteurRef').value = S.set.hauteurRef;
   $('inFov').value     = S.set.fov;
   $('fovVal').textContent = Math.round(S.set.fov) + '°';
   $('inHdg').value     = S.set.fixedHdg == null ? '' : S.set.fixedHdg;
@@ -1543,6 +1705,8 @@ function onSettingChange(){
   S.set.direct     = $('inDirect').checked;
   S.set.circleMode = $('inCircleMode').value;
   S.set.altFt      = clamp(+$('inAlt').value || 500, 200, 6000);
+  const refAvant   = S.set.hauteurRef;
+  S.set.hauteurRef = $('inHauteurRef').value;
   S.set.fov        = clamp(+$('inFov').value || 55, 25, 80);
   const h = $('inHdg').value.trim();
   S.set.fixedHdg   = h === '' ? null : clamp(+h || 0, 0, 359);
@@ -1570,11 +1734,20 @@ function onSettingChange(){
 
   saveSettings(); syncForm(); updateChips();
   map3d.setVerticalFieldOfView(S.set.fov);
+  if (S.set.hauteurRef !== refAvant && S.round){
+    const e = altitudeReferenceTerrain(S.round.truth.lat, S.round.truth.lon);
+    if (e != null) S.round.groundElev = e;
+  }
   if (S.round && S.mode === 'play') updateCamera();
   if (S.mode === 'zone') drawZone(true);
+
+  // Changer d'exercice relance aussitôt une manche : sans ça le nouveau mode
+  // n'apparaissait qu'à la manche suivante, ce qui donnait l'impression que
+  // le réglage n'avait pas pris.
+  if (S.set.mode !== modeAvant && (S.mode === 'play' || S.mode === 'debrief')) newRound();
 }
 
-['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inFov','inHdg','inCenter',
+['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inHauteurRef','inFov','inHdg','inCenter',
  'inSource','inUrl','inUrlZ','inMode','inLegMin','inSweep','inShowCircle']
   .forEach(id => {
     const el = $(id);
@@ -1627,6 +1800,15 @@ $('btnValidate').onclick   = validate;
 $('btnReveal').onclick     = reveal;
 $('btnResetStats').onclick = () => { S.hist = []; saveHist(); renderStats(); updateChips(); toast('Statistiques remises à zéro'); };
 
+$('btnValiderEtalon').onclick = () => {
+  const mm = +$('inEtalon').value;
+  if (!isFinite(mm) || mm < 20 || mm > 90){ toast('Longueur mesurée invalide'); return; }
+  S.set.echelleCal = mm / ETALON_MM;
+  saveSettings(); syncForm();
+  if (S.round) cadrerManche(true);   // la carte reflète l'étalonnage tout de suite
+  toast('Étalonnage enregistré : facteur ' + S.set.echelleCal.toFixed(3));
+};
+
 $('zoneRange').oninput = () => {
   S.set.zoneR = +$('zoneRange').value;
   $('zoneRangeVal').textContent = S.set.zoneR + ' NM';
@@ -1652,6 +1834,10 @@ $('btnLayer').onclick = () => {
 };
 
 $('btnHome').onclick = () => cadrerManche(true);
+
+$('btnEchelle').onclick = () => {
+  chart.easeTo({ zoom: zoomEchelleReelle(chart.getCenter().lat), duration:450 });
+};
 
 $('btnZoomTruth').onclick = () => {
   if (!S.round) return;
