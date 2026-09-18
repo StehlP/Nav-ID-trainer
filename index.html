@@ -105,10 +105,7 @@
   #chartTools .btn:hover{border-color:var(--cyan);color:var(--cyan)}
   #btnHome{display:flex;align-items:center;justify-content:center;padding:6px}
   #btnHome svg{display:block}
-  #circleInfo{top:10px;left:10px;font-size:11.5px;max-width:232px;color:var(--txt2);line-height:1.5}
-  #circleInfo b{color:var(--magenta);filter:brightness(1.7)}
   #answerBar{bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center}
-  #answerHint{color:var(--txt2);font-size:12px}
 
   /* ---------- bandeau mode zone ---------- */
   #zoneBar{
@@ -283,10 +280,6 @@
   <section id="paneChart">
     <div id="mapChart"></div>
 
-    <div class="ov card" id="circleInfo">
-      Vous êtes quelque part dans le <b>cercle d'incertitude</b><span id="ciTxt"></span>.
-    </div>
-
     <div class="ov i" id="chartTools">
       <button class="btn on" id="btnUp" title="Orientation de la carte">Route en haut</button>
       <button class="btn" id="btnLayer" title="Disponible au débriefing" disabled>Voir l'ortho</button>
@@ -299,7 +292,6 @@
     </div>
 
     <div class="ov i" id="answerBar">
-      <span class="hintTxt card" id="answerHint">Cliquez sur la carte où vous pensez être</span>
       <button class="btn primary" id="btnValidate" disabled>Valider</button>
       <button class="btn" id="btnReveal">Révéler</button>
     </div>
@@ -1306,7 +1298,6 @@ chart.on('click', ev => {
   S.round.guess = p;
   showMarker(mkGuess, true, p);
   $('btnValidate').disabled = false;
-  $('answerHint').textContent = 'Déplacez le repère si besoin, puis validez';
 });
 
 function validate(){
@@ -1382,9 +1373,7 @@ function setMode(m){
   $('debrief').classList.toggle('show', db);
   if (!db) $('debrief').classList.remove('ok', 'bad');
   $('zoneBar').style.display = zone ? 'flex' : 'none';
-  $('circleInfo').style.display = (play || db) ? 'block' : 'none';
   $('btnValidate').disabled = !(play && S.round && S.round.guess);
-  if (play){ $('answerHint').textContent = 'Cliquez sur la carte où vous pensez être'; }
   if (zone){ chart.setBearing(0); }
 }
 
@@ -1398,14 +1387,6 @@ function updateChips(){
   $('btnAlt').title     = 'Basculer à ' + bascule + ' ft sol';
   const nm = uncertaintyM() / NM;
   $('cRad').textContent   = nm.toFixed(2) + ' NM';
-  if (S.set.mode === 'branche')
-    $('circleInfo').innerHTML =
-      'Vous suivez la branche tracée. Au chrono affiché, vous êtes à moins de '
-      + '<b>' + S.set.timeMin + ' min</b> du point correspondant sur la branche.';
-  else
-    $('circleInfo').innerHTML =
-      'Vous êtes quelque part dans le <b>cercle d’incertitude</b> de '
-      + nm.toFixed(2) + ' NM de rayon.';
 
   const done = S.hist.filter(h => h.errM != null);
   $('cScore').textContent = done.length
