@@ -750,10 +750,17 @@ function initChartLayers(){
   chart.addSource('leg',  { type:'geojson', data:EMPTY });
   chart.addSource('tops', { type:'geojson', data:EMPTY });
   // Trait de nav facon crayon : noir direct, sans halo clair.
+  // Épaisseur des traits à l'échelle du terrain, comme les chiffres de minutage
+  // (doublement par niveau de zoom, référence au zoom 11) plutôt qu'à une
+  // épaisseur fixe à l'écran — l'effet recherché d'un tracé fait à la main sur
+  // la carte, qui grossit avec elle. `interpolate`/`exponential 2` tient lieu
+  // de clamp() : hors des bornes indiquées, la valeur reste plate.
   chart.addLayer({ id:'leg-line', type:'line', source:'leg',
-    paint:{ 'line-color':'#10161c', 'line-width':3.8 } });
+    paint:{ 'line-color':'#10161c',
+            'line-width':['interpolate', ['exponential', 2], ['zoom'], 9.56, 1.4, 11, 3.8, 12.32, 9.5] } });
   chart.addLayer({ id:'tops-line', type:'line', source:'tops',
-    paint:{ 'line-color':'#10161c', 'line-width':2.6 } });
+    paint:{ 'line-color':'#10161c',
+            'line-width':['interpolate', ['exponential', 2], ['zoom'], 9.62, 1.0, 11, 2.6, 12.32, 6.5] } });
 
   chart.addLayer({ id:'circle-fill', type:'fill', source:'circle',
     paint:{ 'fill-color':'#d0006f', 'fill-opacity':0.07 } });
