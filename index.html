@@ -207,20 +207,15 @@
   .mk-dr{width:14px;height:14px;color:#0b0f17;opacity:.8}
   .mk-zone{color:var(--cyan);filter:drop-shadow(0 0 3px rgba(0,0,0,.9))}
   .mk-hdg{width:68px;height:68px;pointer-events:none}
-  /* Minutage le long de la branche : texte nu (pas d'encart), un halo clair en
-     text-shadow tient lieu de fond pour rester lisible sur tout le terrain. */
+  /* Minutage le long de la branche : texte nu, noir direct, sans encart ni halo. */
   .lbl{
     font-family:var(--mono);font-size:12px;font-weight:700;line-height:1;
     color:#10161c;white-space:nowrap;pointer-events:none;
-    text-shadow:
-      0 0 3px #fff, 0 0 3px #fff, 1px 1px 0 #fff, -1px -1px 0 #fff,
-      1px -1px 0 #fff, -1px 1px 0 #fff;
   }
   /* Points de départ et d'arrivée de la branche : ronds pleins, sans étiquette. */
   .mk-leg-pt{
     width:11px;height:11px;border-radius:50%;
-    background:#10161c;border:2px solid #fff;
-    box-shadow:0 0 2px rgba(0,0,0,.5);pointer-events:none;
+    background:#10161c;pointer-events:none;
   }
   .maplibregl-ctrl-attrib{font-size:10px}
 
@@ -417,8 +412,9 @@
     <p>Entraînement à l'identification en navigation à vue, sur la carte OACI 1/500 000.</p>
     <ol>
       <li>À gauche, la vue <b>depuis l'avion à 500 ft sol</b> : regardez autour à la souris, comme dans le cockpit.</li>
-      <li>À droite, la carte OACI orientée <b>route en haut</b>, avec le <b>cercle d'incertitude</b> : votre position vraie est forcément dedans.</li>
-      <li>Cliquez sur la carte à l'endroit où vous pensez être, puis <b>Valider</b>. Le débriefing donne l'erreur en NM.</li>
+      <li>À droite, la carte OACI orientée <b>route/nord/vue en haut</b>.</li>
+      <li>Choisissez le <b>mode d'exercice</b> dans les réglages.</li>
+      <li>Cliquez sur la carte à l'endroit où vous pensez être, puis <b>Valider</b>.</li>
     </ol>
     <div id="introActions">
       <button class="btn primary" id="btnStart" disabled>Commencer</button>
@@ -748,9 +744,9 @@ function initChartLayers(){
   chart.addSource('tops', { type:'geojson', data:EMPTY });
   // Trait de nav facon crayon : noir direct, sans halo clair.
   chart.addLayer({ id:'leg-line', type:'line', source:'leg',
-    paint:{ 'line-color':'#10161c', 'line-width':2.4 } });
+    paint:{ 'line-color':'#10161c', 'line-width':3.8 } });
   chart.addLayer({ id:'tops-line', type:'line', source:'tops',
-    paint:{ 'line-color':'#10161c', 'line-width':1.6 } });
+    paint:{ 'line-color':'#10161c', 'line-width':2.6 } });
 
   chart.addLayer({ id:'circle-fill', type:'fill', source:'circle',
     paint:{ 'fill-color':'#d0006f', 'fill-opacity':0.07 } });
@@ -1065,6 +1061,7 @@ async function newRound(){
 
   chart.setBearing(chartBearing());
   cadrerManche(false);
+  majEchelleEtiquettes();   // le zoom vient de changer (cadrage) : pas d'attendre l'evenement 'zoom'
 
   updateChips();
 }
@@ -1104,7 +1101,7 @@ function mmss(min){
 const TOP_ECART   = 0.10 * NM;   // espace laissé entre le trait de branche et le repère
 const TOP_COURT   = 0.30 * NM;   // longueur d'un repère de minute impaire
 const TOP_LONG    = TOP_COURT * 2;
-const TOP_LABEL_MARGE = 0.10 * NM;
+const TOP_LABEL_MARGE = 0.24 * NM;   // espace entre la pointe du tiret et le chiffre
 
 /** Traits de minutage le long de la branche : un par minute entière. */
 function topsDeBranche(leg){
@@ -1126,11 +1123,35 @@ function topsDeBranche(leg){
 
 let etiquettes = [];                 // marqueurs de minutage, recrees a chaque manche
 
-function etiquette(texte){
+/** Taille des chiffres de minutage, à l'échelle du terrain plutôt qu'à celle
+ *  de l'écran : elle double à chaque niveau de zoom, exactement comme la
+ *  résolution au sol d'une tuile — un marqueur DOM ne le fait pas de
+ *  lui-même (MapLibre ne pilote que sa position/rotation), on l'ajuste donc
+ *  à la main sur chaque 'zoom', avec des bornes pour rester lisible. */
+const LBL_ZOOM_REF = 11, LBL_PX_REF = 24, LBL_PX_MIN = 14, LBL_PX_MAX = 60;
+function tailleEtiquette(zoom){
+  return clamp(LBL_PX_REF * Math.pow(2, zoom - LBL_ZOOM_REF), LBL_PX_MIN, LBL_PX_MAX);
+}
+function majEchelleEtiquettes(){
+  const px = tailleEtiquette(chart.getZoom()) + 'px';
+  for (const m of etiquettes){
+    const el = m.getElement();
+    if (el.classList.contains('lbl')) el.style.fontSize = px;
+  }
+}
+chart.on('zoom', majEchelleEtiquettes);
+
+/** Étiquette de minutage : orientée dans le sens de la route, elle tourne donc
+ *  avec la carte — `rotationAlignment:'map'` fait appliquer rotateZ(rotation −
+ *  cap carte), le même mécanisme que la flèche de cap (mkHdg) plus haut. */
+function etiquette(texte, route){
   const el = document.createElement('div');
   el.className = 'lbl';
   el.textContent = texte;
-  return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
+  el.style.fontSize = tailleEtiquette(chart.getZoom()) + 'px';
+  const mk = new maplibregl.Marker({ element:el, rotationAlignment:'map', pitchAlignment:'viewport' });
+  mk.setRotation(route);
+  return mk;
 }
 
 /** Point plein qui marque le départ ou l'arrivée de la branche. */
@@ -1157,7 +1178,7 @@ function dessinerBranche(){
   chart.getSource('tops').setData({ type:'FeatureCollection', features:traits });
 
   for (const l of labels)
-    etiquettes.push(etiquette(String(l.min)).setLngLat([l.pos.lon, l.pos.lat]).addTo(chart));
+    etiquettes.push(etiquette(String(l.min), leg.route).setLngLat([l.pos.lon, l.pos.lat]).addTo(chart));
   etiquettes.push(pointBranche().setLngLat([leg.a.lon, leg.a.lat]).addTo(chart));
   etiquettes.push(pointBranche().setLngLat([leg.b.lon, leg.b.lat]).addTo(chart));
 }
