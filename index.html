@@ -1089,7 +1089,7 @@ async function newRound(){
   showMarker(mkHdg, false);
 
   chart.setBearing(chartBearing());
-  chart.jumpTo({ center:[center.lon, center.lat], zoom: zoomForCircle(center.lat, R) });
+  cadrerManche(false);
 
   updateChips();
 }
@@ -1279,6 +1279,25 @@ function zoomForCircle(lat, R){
   const z = Math.log2(78271.516 * Math.cos(rad(lat)) / mpp);
   const f = fondCourant || { minzoom:6, maxzoom:11 };
   return clamp(z, f.minzoom, Math.max(14, f.maxzoom + 2));
+}
+
+/** Recadre la carte sur la manche en cours : le cercle d'incertitude en mode
+ *  cercle, ou la totalité de la branche (A à B) en mode chrono — quelle que
+ *  soit son orientation. fitBounds() gère nativement la rotation (bearing) en
+ *  recalculant le cadrage autour du rectangle englobant tourné : une branche
+ *  est-ouest ou une branche nord-sud tiennent donc pareillement à l'écran. */
+function cadrerManche(anime){
+  const r = S.round; if (!r) return;
+  const bearing = chartBearing();
+  const opts = anime ? { duration:450 } : { duration:0 };
+  if (r.leg){
+    const b = new maplibregl.LngLatBounds([r.leg.a.lon, r.leg.a.lat], [r.leg.a.lon, r.leg.a.lat]);
+    b.extend([r.leg.b.lon, r.leg.b.lat]);
+    chart.fitBounds(b, Object.assign({ bearing, padding:74, maxZoom:14 }, opts));
+  }else{
+    chart.easeTo(Object.assign({ center:[r.center.lon, r.center.lat],
+                                 zoom:zoomForCircle(r.center.lat, r.radiusM), bearing }, opts));
+  }
 }
 
 // Affinage de l'altitude sol dès que les tuiles MNT sont chargées dans la vue 3D.
@@ -1608,7 +1627,10 @@ $('btnUp').onclick = () => {
   const cycle = ['route', 'regard', 'north'];
   S.set.chartUp = cycle[(cycle.indexOf(S.set.chartUp) + 1) % cycle.length];
   saveSettings(); syncForm();
-  chart.easeTo({ bearing: chartBearing(), duration:400 });
+  // En mode branche, une rotation change ce que le rectangle englobant occupe
+  // à l'écran : on repasse par cadrerManche() pour ne pas laisser la branche
+  // déborder après le changement d'orientation.
+  if (S.round) cadrerManche(true); else chart.easeTo({ bearing:chartBearing(), duration:400 });
 };
 
 $('btnLayer').onclick = () => {
@@ -1618,12 +1640,7 @@ $('btnLayer').onclick = () => {
   $('btnLayer').classList.toggle('on', !on);
 };
 
-$('btnHome').onclick = () => {
-  if (!S.round) return;
-  chart.easeTo({ center:[S.round.center.lon, S.round.center.lat],
-                 zoom: zoomForCircle(S.round.center.lat, S.round.radiusM),
-                 bearing: chartBearing(), duration:450 });
-};
+$('btnHome').onclick = () => cadrerManche(true);
 
 $('btnZoomTruth').onclick = () => {
   if (!S.round) return;
