@@ -86,6 +86,10 @@
   #lookInfo{top:10px;left:10px}
   #lookInfo .big{font-family:var(--mono);font-size:16px;font-weight:600;color:var(--cyan)}
   #lookInfo .sub{color:var(--txt2);font-size:11.5px;margin-top:3px;font-family:var(--mono)}
+  #chronoBox{top:10px;left:50%;transform:translateX(-50%);text-align:center;padding:7px 16px}
+  #chronoBox .ct-l{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt2)}
+  #chronoBox .ct-v{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--cyan);line-height:1.15}
+  #chronoBox .ct-s{font-family:var(--mono);font-size:11px;color:var(--txt3)}
   #hint3d{top:10px;right:10px;max-width:196px;color:var(--txt3);font-size:11px;line-height:1.5}
   #hint3d b{color:var(--txt2)}
   #rose{bottom:12px;left:12px;width:104px;height:104px;cursor:pointer}
@@ -212,6 +216,13 @@
   .mk-dr{width:14px;height:14px;color:#0b0f17;opacity:.8}
   .mk-zone{color:var(--cyan);filter:drop-shadow(0 0 3px rgba(0,0,0,.9))}
   .mk-hdg{width:68px;height:68px;pointer-events:none}
+  /* étiquettes de minutage le long de la branche de nav */
+  .lbl{
+    font-family:var(--mono);font-size:11px;font-weight:600;line-height:1;
+    color:#10161c;background:rgba(255,255,255,.86);border:1px solid rgba(16,22,28,.4);
+    border-radius:4px;padding:2px 4px;white-space:nowrap;pointer-events:none;
+  }
+  .lbl-ab{font-size:12px;background:#10161c;color:#fff;border-color:#10161c;padding:2px 6px}
   .maplibregl-ctrl-attrib{font-size:10px}
 
   .toast{
@@ -335,6 +346,25 @@
     <button class="btn" id="btnCloseDrawer">Fermer</button>
   </div>
   <div id="drawerBody">
+
+    <div class="grp">
+      <h3>Mode d'entraînement</h3>
+      <div class="row"><span>Exercice</span>
+        <select id="inMode">
+          <option value="cercle">Cercle d'incertitude donné</option>
+          <option value="branche">Branche de nav au chrono</option>
+        </select>
+      </div>
+      <div id="grpBranche" hidden>
+        <div class="row"><span>Durée de la branche</span>
+          <input type="number" id="inLegMin" min="6" max="60" step="1"> <span class="unit">min</span></div>
+        <div class="row"><span>Top toutes les</span>
+          <input type="number" id="inTop" min="1" max="10" step="1"> <span class="unit">min</span></div>
+        <div class="row"><span>Tracer le cercle</span><input type="checkbox" id="inShowCircle"></div>
+        <p class="muted">Le cercle d'incertitude n'est pas tracé par défaut : à vous de placer
+          votre position estimée d'après le chrono et le minutage de la branche.</p>
+      </div>
+    </div>
 
     <div class="grp">
       <h3>Fond de carte</h3>
@@ -465,6 +495,22 @@ function destPoint(lat, lon, brg, dist){
   return { lat: deg(p2), lon: ((deg(l2) + 540) % 360) - 180 };
 }
 
+/** Point atteint en suivant un cap CONSTANT (loxodromie) — c'est ainsi qu'on vole
+ *  une branche de nav. Deux proprietes utiles ici : le cap retour vaut exactement
+ *  route+180, et la trajectoire est une droite en projection Mercator, donc le
+ *  trait droit de la carte et les tops perpendiculaires sont rigoureusement justes.
+ *  L'orthodromie de destPoint() donnerait une erreur d'une centaine de metres
+ *  sur une branche de 40 NM. */
+function rhumbDest(lat, lon, brg, dist){
+  const d = dist / R_EARTH, b = rad(brg), p1 = rad(lat);
+  const dp = d * Math.cos(b);
+  const p2 = p1 + dp;
+  const dPsi = Math.log(Math.tan(p2 / 2 + Math.PI / 4) / Math.tan(p1 / 2 + Math.PI / 4));
+  const q = Math.abs(dPsi) > 1e-12 ? dp / dPsi : Math.cos(p1);   // cap est-ouest pur
+  const dl = d * Math.sin(b) / q;
+  return { lat: deg(p2), lon: ((deg(rad(lon) + dl) + 540) % 360) - 180 };
+}
+
 /** Distance orthodromique en mètres. */
 function distance(a, b){
   const p1 = rad(a.lat), p2 = rad(b.lat);
@@ -578,7 +624,9 @@ const DEFAULTS = {
   gs:130, timeMin:1, radiusNM:2.17, direct:false,
   circleMode:'dr',
   altFt:500, fov:55, chartUp:'route',
-  source:'ign', urlTuiles:'', urlMaxZoom:11,
+  source:'url', urlMaxZoom:11,
+  urlTuiles:'https://StehlP.github.io/Nav-ID-trainer/tuiles/{z}/{x}/{y}.png',
+  mode:'cercle', legMin:18, topMin:1, showCircle:false,
   fixedHdg:null
 };
 
@@ -593,7 +641,7 @@ function sourceCarte(){
              bounds:c.bounds, nom:c.nom, attribution:'Carte personnelle — ' + c.nom };
   if (S.set.source === 'url' && (S.set.urlTuiles || '').trim())
     return { tiles:[S.set.urlTuiles.trim()], minzoom:6, maxzoom:S.set.urlMaxZoom,
-             bounds:null, nom:'Tuiles personnalisées', attribution:'Tuiles personnalisées' };
+             bounds:S.bornesUrl, nom:'Tuiles publiées', attribution:'Tuiles personnelles' };
   return { tiles:[CFG.oaci], minzoom:6, maxzoom:CFG.oaciMaxZoom,
            bounds:null, nom:"Carte OACI de l'IGN", attribution:CFG.attrIGN };
 }
@@ -601,6 +649,7 @@ function sourceCarte(){
 const S = {
   set: Object.assign({}, DEFAULTS),
   carteInfo: null,               // métadonnées du MBTiles servi en local, si présent
+  bornesUrl: null,               // emprise lue dans le tiles.json du jeu de tuiles distant
   mode:'intro',                        // intro | zone | play | debrief
   round:null,
   view:{ rel:0, site:8 },              // azimut relatif du regard / site (dépression)
@@ -614,6 +663,7 @@ function loadState(){
   try{
     const s = JSON.parse(localStorage.getItem(LS_SET) || 'null');
     if (s) Object.assign(S.set, DEFAULTS, s);
+    if (!S.set.urlTuiles) S.set.urlTuiles = DEFAULTS.urlTuiles;   // reglages d'avant cette adresse
     const h = JSON.parse(localStorage.getItem(LS_HIST) || 'null');
     if (Array.isArray(h)) S.hist = h;
   }catch(e){ /* réglages illisibles : on repart des valeurs par défaut */ }
@@ -710,6 +760,20 @@ function initChartLayers(){
   chart.addLayer({ id:'zone-line', type:'line', source:'zone',
     paint:{ 'line-color':'#36c5e0', 'line-width':2.6, 'line-dasharray':[2.4,1.7] } });
 
+  chart.addSource('leg',  { type:'geojson', data:EMPTY });
+  chart.addSource('tops', { type:'geojson', data:EMPTY });
+  // Trait de nav facon crayon : halo clair puis trait sombre, lisible sur toutes
+  // les teintes de la carte.
+  chart.addLayer({ id:'leg-casing', type:'line', source:'leg',
+    paint:{ 'line-color':'#ffffff', 'line-width':5.5, 'line-opacity':0.75 } });
+  chart.addLayer({ id:'leg-line', type:'line', source:'leg',
+    paint:{ 'line-color':'#10161c', 'line-width':2.4 } });
+  chart.addLayer({ id:'tops-casing', type:'line', source:'tops',
+    paint:{ 'line-color':'#ffffff', 'line-width':4.5, 'line-opacity':0.75 } });
+  chart.addLayer({ id:'tops-line', type:'line', source:'tops',
+    paint:{ 'line-color':'#10161c',
+            'line-width':['case', ['get','gros'], 2.2, 1.4] } });
+
   chart.addLayer({ id:'circle-fill', type:'fill', source:'circle',
     paint:{ 'fill-color':'#d0006f', 'fill-opacity':0.07 } });
   chart.addLayer({ id:'circle-line', type:'line', source:'circle',
@@ -720,6 +784,7 @@ function initChartLayers(){
 
   appliquerFond();
   detecterCartePerso();
+  decouvrirBornesUrl();
 
   S.ready.chart = true; checkReady();
 }
@@ -799,7 +864,8 @@ function updateCamera(){
 
   const agl    = S.set.altFt * FT;
   const camAlt = r.groundElev + agl;
-  const site   = clamp(S.view.site, 4, 75);
+  const c      = contraintesVue();
+  const site   = c.siteFixe != null ? c.siteFixe : clamp(S.view.site, 4, 75);
   const az     = norm360(r.heading + S.view.rel);
 
   // Le point visé est purement géométrique : il est posé sur le plan horizontal
@@ -832,6 +898,13 @@ function updateLookHud(){
   $('lkHdg').textContent   = String(Math.round(r.heading)).padStart(3, '0') + '°';
   $('lkSite').textContent  = Math.round(S.view.site) + '°';
   $('lkFov').textContent   = Math.round(S.set.fov) + '°';
+  const branche = S.set.mode === 'branche' && r.leg;
+  $('chronoBox').hidden = !branche;
+  if (branche){
+    $('chronoVal').textContent = mmss(r.chrono);
+    $('chronoSub').textContent = 'Rv ' + String(Math.round(r.leg.route)).padStart(3,'0')
+                               + '°  ·  ' + r.leg.gs + ' kt  ·  branche ' + r.leg.dureeMin + ' min';
+  }
   $('roseRing').setAttribute('transform', 'rotate(' + (-r.heading) + ')');
   $('viewCone').setAttribute('transform', 'rotate(' + rel + ')');
 }
@@ -853,9 +926,11 @@ function updateLookHud(){
     S.drag.x = ev.clientX; S.drag.y = ev.clientY;
     // Sens « on attrape le paysage » : le décor suit le curseur, donc la caméra
     // part à l'opposé du geste — comme dans Google Earth.
-    S.view.rel  = norm360(S.view.rel - dx * 0.22);
-    if (S.view.rel > 180) S.view.rel -= 360;
-    S.view.site = clamp(S.view.site - dy * 0.14, 4, 75);
+    const c = contraintesVue();
+    let rel = S.view.rel - dx * 0.22;
+    if (rel > 180) rel -= 360; else if (rel < -180) rel += 360;
+    S.view.rel = clamp(rel, -c.relMax, c.relMax);
+    if (c.siteFixe == null) S.view.site = clamp(S.view.site - dy * 0.14, 4, 75);
     updateCamera();
   });
   const end = ev => {
@@ -877,7 +952,11 @@ function updateLookHud(){
   }, { passive:false });
 
   /** Remet le regard dans l'axe de l'avion, site par défaut. */
-  function recentrerRegard(){ S.view.rel = 0; S.view.site = 8; updateCamera(); }
+  function recentrerRegard(){
+    S.view.rel = 0;
+    S.view.site = contraintesVue().siteFixe || 8;
+    updateCamera();
+  }
 
   // Un clic sur la rose des vents ramène le regard à midi.
   $('rose').addEventListener('click', recentrerRegard);
@@ -892,11 +971,12 @@ function updateLookHud(){
   window.addEventListener('keydown', ev => {
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
     const k = ev.key.toLowerCase();
+    const c = contraintesVue();
     if (k === 'r'){ recentrerRegard(); }
-    else if (ev.key === 'ArrowLeft')  { S.view.rel = norm360(S.view.rel - 5); if (S.view.rel > 180) S.view.rel -= 360; updateCamera(); }
-    else if (ev.key === 'ArrowRight') { S.view.rel = norm360(S.view.rel + 5); if (S.view.rel > 180) S.view.rel -= 360; updateCamera(); }
-    else if (ev.key === 'ArrowUp')    { S.view.site = clamp(S.view.site - 2, 4, 75); updateCamera(); }
-    else if (ev.key === 'ArrowDown')  { S.view.site = clamp(S.view.site + 2, 4, 75); updateCamera(); }
+    else if (ev.key === 'ArrowLeft')  { S.view.rel = clamp(S.view.rel - 5, -c.relMax, c.relMax); updateCamera(); }
+    else if (ev.key === 'ArrowRight') { S.view.rel = clamp(S.view.rel + 5, -c.relMax, c.relMax); updateCamera(); }
+    else if (ev.key === 'ArrowUp')    { if (c.siteFixe == null){ S.view.site = clamp(S.view.site - 2, 4, 75); updateCamera(); } }
+    else if (ev.key === 'ArrowDown')  { if (c.siteFixe == null){ S.view.site = clamp(S.view.site + 2, 4, 75); updateCamera(); } }
     else if (k === 'n' && S.mode !== 'intro'){ newRound(); }
     else if (ev.key === 'Enter' && S.mode === 'play' && S.round.guess){ validate(); }
     else return;
@@ -925,33 +1005,63 @@ async function pickTruth(){
   return null;
 }
 
-async function newRound(){
-  if (!S.ready.chart) return;
-  $('btnNew').disabled = true;
+/** Mode 1 : cercle d'incertitude donné, cap quelconque. */
+async function genererCercle(){
   const found = await pickTruth();
-  $('btnNew').disabled = false;
-
-  if (!found){
-    toast('Aucune position valide dans cette zone (mer ou hors couverture). Déplacez le centre.', 4200);
-    return;
-  }
-
+  if (!found) return null;
   const R = uncertaintyM();
   const heading = (S.set.fixedHdg == null)
       ? Math.floor(Math.random() * 72) * 5          // 000 à 355, par pas de 5°
       : norm360(S.set.fixedHdg);
-
   const center = (S.set.circleMode === 'truth')
       ? found.pos
       : randomInDisc(found.pos, R * 0.98);       // la vérité reste dans le cercle
+  return { truth:found.pos, groundElev:found.elev, heading, center, radiusM:R,
+           leg:null, chrono:null };
+}
 
-  S.round = {
-    n: (S.round ? S.round.n : 0) + 1,
-    truth: found.pos, groundElev: found.elev,
-    heading, center, radiusM: R,
-    guess: null, answered:false, t0: Date.now()
-  };
-  S.view = { rel:0, site:8 };
+/** Mode 2 : on suit une branche de nav, chrono en main.
+ *  On tire d'abord le point estimé dans la zone, puis on construit la branche
+ *  autour : l'exercice reste ainsi centré sur la zone de travail choisie. */
+async function genererBranche(){
+  const gs = S.set.gs, dureeMin = S.set.legMin;
+  const R = uncertaintyM();
+  for (let i = 0; i < 60; i++){
+    const chrono = 1.5 + Math.random() * (dureeMin - 3);
+    const route  = Math.floor(Math.random() * 72) * 5;
+    const dr = randomInDisc(S.set.zone, S.set.zoneR * NM);          // position estimée
+    const a  = rhumbDest(dr.lat, dr.lon, route + 180, gs * chrono / 60 * NM);
+    const b  = rhumbDest(a.lat, a.lon, route, gs * dureeMin / 60 * NM);
+    const leg = { a, b, route, gs, dureeMin };
+    // Le centre fait foi : on le reprend sur la branche construite, pour qu'il
+    // tombe exactement sur le trait et sur le minutage affiches.
+    const centre = pointSurBranche(leg, chrono);
+    if (!inBbox(a) || !inBbox(b) || !inBbox(centre)) continue;
+    const truth = randomInDisc(centre, R * 0.98);                    // vérité dans le cercle
+    if (!inBbox(truth)) continue;
+    const e = await demElevation(truth.lat, truth.lon);
+    if (e == null || e < 1) continue;
+    return { truth, groundElev:e, heading:route, center:centre, radiusM:R, leg, chrono };
+  }
+  return null;
+}
+
+async function newRound(){
+  if (!S.ready.chart) return;
+  $('btnNew').disabled = true;
+  const d = S.set.mode === 'branche' ? await genererBranche() : await genererCercle();
+  $('btnNew').disabled = false;
+
+  if (!d){
+    toast('Aucune position valide dans cette zone (mer ou hors couverture). Déplacez le centre.', 4200);
+    return;
+  }
+
+  S.round = Object.assign({ n:(S.round ? S.round.n : 0) + 1,
+                            guess:null, answered:false, t0:Date.now() }, d);
+  const found = { pos:d.truth, elev:d.groundElev };
+  const heading = d.heading, center = d.center, R = d.radiusM;
+  S.view = { rel:0, site: contraintesVue().siteFixe || 8 };
   S.elevFixed = false;
   setMode('play');
 
@@ -967,10 +1077,12 @@ async function newRound(){
   $('btnLayer').classList.remove('on');
   $('btnLayer').disabled = true;
 
-  chart.getSource('circle').setData(polyFeature(circleRing(center, R)));
+  dessinerBranche();
+  const cercleVisible = S.set.mode !== 'branche' || S.set.showCircle;
+  chart.getSource('circle').setData(cercleVisible ? polyFeature(circleRing(center, R)) : EMPTY);
   chart.getSource('zone').setData(EMPTY);
   chart.getSource('err').setData(EMPTY);
-  showMarker(mkDR, S.set.circleMode === 'dr', center);
+  showMarker(mkDR, S.set.mode === 'branche' ? false : S.set.circleMode === 'dr', center);
   showMarker(mkGuess, false);
   showMarker(mkTruth, false);
   showMarker(mkZone, false);
@@ -995,6 +1107,76 @@ function chartBearing(){
 
 const LIBELLE_ORIENTATION = { route:'Route en haut', regard:'Regard en haut', north:'Nord en haut' };
 
+/* ==========================================================================
+   BRANCHE DE NAV — mode chrono
+   ========================================================================== */
+
+/** Point de la branche atteint au bout de `min` minutes de vol. */
+function pointSurBranche(leg, min){
+  return rhumbDest(leg.a.lat, leg.a.lon, leg.route, leg.gs * min / 60 * NM);
+}
+
+/** mm:ss */
+function mmss(min){
+  const t = Math.round(min * 60);
+  return String(Math.floor(t / 60)).padStart(2,'0') + ':' + String(t % 60).padStart(2,'0');
+}
+
+/** Traits perpendiculaires de minutage le long de la branche. */
+function topsDeBranche(leg){
+  const traits = [], labels = [];
+  const pas = Math.max(1, S.set.topMin);
+  for (let m = pas; m < leg.dureeMin - 0.01; m += pas){
+    const p = pointSurBranche(leg, m);
+    const gros = (m % 5 === 0);
+    const demi = (gros ? 0.75 : 0.38) * NM;
+    const g = destPoint(p.lat, p.lon, leg.route - 90, demi);
+    const d = destPoint(p.lat, p.lon, leg.route + 90, demi);
+    traits.push({ type:'Feature', properties:{ gros },
+                  geometry:{ type:'LineString', coordinates:[[g.lon,g.lat],[d.lon,d.lat]] } });
+    if (gros) labels.push({ min:m, pos:destPoint(p.lat, p.lon, leg.route + 90, demi * 1.45) });
+  }
+  return { traits, labels };
+}
+
+let etiquettes = [];                 // marqueurs de minutage, recrees a chaque manche
+
+function etiquette(texte, cls){
+  const el = document.createElement('div');
+  el.className = 'lbl ' + (cls || '');
+  el.textContent = texte;
+  return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
+}
+
+/** Trace la branche, ses tops de minutage et ses etiquettes. Efface tout en mode cercle. */
+function dessinerBranche(){
+  etiquettes.forEach(m => m.remove());
+  etiquettes = [];
+  const leg = S.round && S.round.leg;
+  if (!leg){
+    chart.getSource('leg').setData(EMPTY);
+    chart.getSource('tops').setData(EMPTY);
+    return;
+  }
+  chart.getSource('leg').setData({ type:'Feature', properties:{},
+    geometry:{ type:'LineString', coordinates:[[leg.a.lon,leg.a.lat],[leg.b.lon,leg.b.lat]] } });
+
+  const { traits, labels } = topsDeBranche(leg);
+  chart.getSource('tops').setData({ type:'FeatureCollection', features:traits });
+
+  for (const l of labels)
+    etiquettes.push(etiquette(String(l.min), '').setLngLat([l.pos.lon, l.pos.lat]).addTo(chart));
+  etiquettes.push(etiquette('A', 'lbl-ab').setLngLat([leg.a.lon, leg.a.lat]).addTo(chart));
+  etiquettes.push(etiquette('B', 'lbl-ab').setLngLat([leg.b.lon, leg.b.lat]).addTo(chart));
+}
+
+/** Libertes de la vue 3D selon le mode : en branche on ne balaie que le secteur
+ *  avant, site fige, comme un regard porte dehors depuis le poste. */
+function contraintesVue(){
+  return S.set.mode === 'branche' ? { relMax:60, siteFixe:4 }
+                                  : { relMax:180, siteFixe:null };
+}
+
 /** Interroge le serveur local : un .mbtiles depose dans le dossier est detecte
  *  automatiquement. Echoue silencieusement si la page est ouverte sans serveur. */
 async function detecterCartePerso(){
@@ -1013,25 +1195,47 @@ async function detecterCartePerso(){
   }catch(e){ /* pas de serveur local : on reste sur la carte en ligne */ }
 }
 
-/** Ligne d'explication sous le selecteur de fond. */
+/** Un jeu de tuiles publie par exporter-tuiles.js est accompagne d'un tiles.json.
+ *  On y lit l'emprise et le zoom maximum, pour que les tirages restent dans la
+ *  couverture reelle de la carte plutot que sur des tuiles absentes. */
+const bornesLues = new Map();
+async function decouvrirBornesUrl(){
+  const u = (S.set.urlTuiles || '').trim();
+  const i = u.indexOf('{z}');
+  if (i < 0) return;
+  if (bornesLues.has(u)){ S.bornesUrl = bornesLues.get(u); return; }
+  bornesLues.set(u, null);
+  try{
+    const r = await fetch(u.slice(0, i) + 'tiles.json');
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!Array.isArray(j.bounds) || j.bounds.length !== 4) return;
+    bornesLues.set(u, j.bounds);
+    S.bornesUrl = j.bounds;
+    if (Number.isFinite(j.maxzoom)) S.set.urlMaxZoom = j.maxzoom;
+    if (S.set.source === 'url'){ appliquerFond(); syncForm(); }
+  }catch(e){ /* pas de tiles.json : on laisse l'emprise libre */ }
+}
+
+/** Ligne d'+String.fromCharCode(39)+'explication sous le selecteur de fond. */
 function majInfoFond(){
   const f = fondCourant; if (!f) return;
   let t;
   if (S.set.source === 'perso' && S.carteInfo)
     t = S.carteInfo.fichier + ' · ' + S.carteInfo.tuiles + ' tuiles · zoom '
-      + f.minzoom + ' a ' + f.maxzoom + '.';
+      + f.minzoom + ' à ' + f.maxzoom + '.';
   else if (S.set.source === 'url')
-    t = 'Tuiles en Web Mercator, schema {z}/{x}/{y}. Le serveur doit autoriser CORS'
+    t = 'Tuiles en Web Mercator, schéma {z}/{x}/{y}. Le serveur doit autoriser CORS'
       + " — c'est le cas de GitHub Pages.";
   else
-    t = 'Carte OACI-VFR de l IGN, zoom 6 a 11 : la resolution native du 1/500 000.';
+    t = 'Carte OACI-VFR de l’IGN, zoom 6 à 11 : la résolution native du 1/500 000.';
   if (f.bounds){
     const b = empriseUtile();
-    t += ' Tirages limites a ' + b.s.toFixed(2) + '–' + b.n.toFixed(2) + '° N, '
+    t += ' Tirages limités à ' + b.s.toFixed(2) + '–' + b.n.toFixed(2) + '° N, '
        + b.w.toFixed(2) + '–' + b.e.toFixed(2) + '° E.';
   }
   if (!S.carteInfo && S.set.source !== 'url')
-    t += ' Pour un MBTiles local, placez le fichier dans le dossier et lancez start.cmd.';
+    t += ' Pour une carte MBTiles locale, placez le fichier dans ce dossier et lancez start.cmd.';
   $('fondInfo').textContent = t;
 }
 
@@ -1156,7 +1360,8 @@ function finishRound(guess, revealed){
     $('dbMeta').textContent =
       Math.round(errM) + ' m · erreur au ' + String(Math.round(bearingTo(r.truth, guess))).padStart(3,'0') + '°'
       + ' · ' + secs.toFixed(0) + ' s'
-      + ' · cap ' + String(Math.round(r.heading)).padStart(3,'0') + '°'
+      + (r.leg ? ' · chrono ' + mmss(r.chrono) + ' · Rv ' + String(Math.round(r.leg.route)).padStart(3,'0') + '°'
+                : ' · cap ' + String(Math.round(r.heading)).padStart(3,'0') + '°')
       + ' · position vraie ' + fmtLatLon(r.truth)
       + ' · sol ' + Math.round(r.groundElev / FT) + ' ft';
   }
@@ -1192,7 +1397,19 @@ function updateChips(){
   $('btnAlt').title     = 'Basculer à ' + bascule + ' ft sol';
   const nm = uncertaintyM() / NM;
   $('cRad').textContent   = nm.toFixed(2) + ' NM';
-  $('ciTxt').textContent  = ' de ' + nm.toFixed(2) + ' NM de rayon';
+  if (S.set.mode === 'branche')
+    $('circleInfo').innerHTML =
+      'Vous suivez la branche tracée. Au chrono affiché, vous êtes à moins de '
+      + '<b>' + S.set.timeMin + ' min</b> du point correspondant sur la branche.';
+  else
+    $('circleInfo').innerHTML =
+      'Vous êtes quelque part dans le <b>cercle d’incertitude</b> de '
+      + nm.toFixed(2) + ' NM de rayon.';
+  $('hint3d').innerHTML = (S.set.mode === 'branche')
+      ? 'Balayage limité à <b>±60°</b> de part et d’autre de l’axe, site figé à 4° — '
+      + 'comme un regard porté dehors. <b>R</b> ou clic sur la rose pour revenir dans l’axe.'
+      : 'Glissez à la souris pour regarder autour · molette = zoom optique · '
+      + '<b>R</b> ou clic sur la rose = recentrer dans l’axe';
 
   const done = S.hist.filter(h => h.errM != null);
   $('cScore').textContent = done.length
@@ -1265,6 +1482,11 @@ function syncForm(){
   $('inGs').disabled   = S.set.direct;
   $('inTime').disabled = S.set.direct;
   $('inCircleMode').value = S.set.circleMode;
+  $('inMode').value        = S.set.mode;
+  $('inLegMin').value      = S.set.legMin;
+  $('inTop').value         = S.set.topMin;
+  $('inShowCircle').checked= S.set.showCircle;
+  $('grpBranche').hidden   = S.set.mode !== 'branche';
   $('inSource').value  = S.set.source;
   $('inUrl').value     = S.set.urlTuiles;
   $('inUrlZ').value    = S.set.urlMaxZoom;
@@ -1295,6 +1517,12 @@ function onSettingChange(){
   const h = $('inHdg').value.trim();
   S.set.fixedHdg   = h === '' ? null : clamp(+h || 0, 0, 359);
 
+  const modeAvant = S.set.mode;
+  S.set.mode       = $('inMode').value;
+  S.set.legMin     = clamp(+$('inLegMin').value || 18, 6, 60);
+  S.set.topMin     = clamp(+$('inTop').value || 1, 1, 10);
+  S.set.showCircle = $('inShowCircle').checked;
+
   const fondAvant = JSON.stringify([S.set.source, S.set.urlTuiles, S.set.urlMaxZoom]);
   S.set.source     = $('inSource').value;
   S.set.urlTuiles  = $('inUrl').value.trim();
@@ -1304,7 +1532,11 @@ function onSettingChange(){
   const c = $('inCenter').value.split(/[ ,;]+/).map(Number).filter(n => !isNaN(n));
   if (c.length === 2 && Math.abs(c[0]) <= 90 && Math.abs(c[1]) <= 180) S.set.zone = { lat:c[0], lon:c[1] };
 
-  if (JSON.stringify([S.set.source, S.set.urlTuiles, S.set.urlMaxZoom]) !== fondAvant) appliquerFond();
+  if (JSON.stringify([S.set.source, S.set.urlTuiles, S.set.urlMaxZoom]) !== fondAvant){
+    S.bornesUrl = bornesLues.get((S.set.urlTuiles || '').trim()) || null;
+    appliquerFond();
+    if (S.set.source === 'url') decouvrirBornesUrl();
+  }
 
   saveSettings(); syncForm(); updateChips();
   map3d.setVerticalFieldOfView(S.set.fov);
@@ -1313,7 +1545,7 @@ function onSettingChange(){
 }
 
 ['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inFov','inHdg','inCenter',
- 'inSource','inUrl','inUrlZ']
+ 'inSource','inUrl','inUrlZ','inMode','inLegMin','inTop','inShowCircle']
   .forEach(id => {
     const el = $(id);
     el.addEventListener('change', onSettingChange);
