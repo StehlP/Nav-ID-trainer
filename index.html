@@ -190,6 +190,12 @@
   #introCard b{color:var(--txt)}
   #introActions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
   #introStatus{margin-top:14px;font-size:11px;color:var(--txt3);font-family:var(--mono)}
+  #introOrdre{
+    margin-top:16px;padding-top:14px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:15px;font-weight:600;letter-spacing:.04em;
+    color:var(--cyan);text-align:center;
+  }
+  #introOrdre span{color:var(--txt3);font-weight:400;font-size:12px;margin:0 4px}
 
   /* ---------- marqueurs carte ---------- */
   /* MapLibre place et centre lui-même le marqueur : .maplibregl-marker impose
@@ -421,6 +427,7 @@
       <button class="btn" id="btnIntroZone">Choisir la zone</button>
     </div>
     <div id="introStatus">Chargement des cartes…</div>
+    <div id="introOrdre">CHRONO <span>puis</span> CARTE <span>puis</span> SOL</div>
   </div>
 </div>
 
