@@ -137,10 +137,14 @@
 
   /* ---------- tiroir réglages ---------- */
   #drawer{
+    /* Décalage fermé en pixels absolus, pas en % de la largeur propre : sur
+       iOS Safari, la barre d'adresse dynamique peut faire recalculer le
+       viewport juste après le premier rendu, et un translateX(102%) calculé
+       avant ce recalage laissait le tiroir visible au chargement. */
     position:absolute;z-index:20;top:var(--h-top);right:0;bottom:0;width:340px;max-width:92vw;
     background:var(--panel);border-left:1px solid var(--line);
-    transform:translateX(102%);transition:transform .22s ease;
-    display:flex;flex-direction:column;
+    transform:translateX(360px);transition:transform .22s ease;
+    display:flex;flex-direction:column;visibility:hidden;
   }
   #drawer.open{transform:none;box-shadow:-18px 0 40px rgba(0,0,0,.5)}
   #drawerHead{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
@@ -783,6 +787,17 @@ const chart = new maplibregl.Map({
   center:[DEFAULTS.zone.lon, DEFAULTS.zone.lat], zoom:10
 });
 chart.touchZoomRotate.disableRotation();
+// disableRotation() n'est pas parfaitement étanche sur certains gestes tactiles
+// multipoints (pincer-zoomer) : un résidu de rotation passe parfois quand même,
+// perceptible surtout sur tablette. En mode route/nord la carte doit rester à
+// un cap FIXE ; on la recale donc activement dès qu'elle en dérive, plutôt que
+// de compter uniquement sur la désactivation du geste.
+chart.on('rotate', () => {
+  if (!S.round || S.set.chartUp === 'regard') return;
+  const vise = chartBearing();
+  const ecart = Math.abs(((chart.getBearing() - vise + 540) % 360) - 180);  // écart angulaire, 0..180
+  if (ecart > 0.05) chart.setBearing(vise);
+});
 chart.addControl(new maplibregl.ScaleControl({ unit:'nautical', maxWidth:110 }), 'bottom-left');
 chart.addControl(new maplibregl.NavigationControl({ showCompass:false, visualizePitch:false }), 'bottom-right');
 
@@ -1701,8 +1716,27 @@ function exitZoneMode(){
 }
 
 /* ---- tiroir ---- */
-function openDrawer(){ $('drawer').classList.add('open'); syncForm(); renderStats(); }
-function closeDrawer(){ $('drawer').classList.remove('open'); }
+// visibility est gérée en JS plutôt qu'en CSS pure : une transition CSS sur une
+// propriété discrète (delay + duration 0) ne se déclenche pas de façon fiable
+// dans tous les moteurs. Par défaut (règle #drawer de base) le tiroir est
+// invisible — c'est ce qui garantit qu'il ne se voit jamais avant la première
+// interaction, y compris pendant le tout premier rendu sur iOS.
+let fermetureDrawerTO = null;
+function openDrawer(){
+  clearTimeout(fermetureDrawerTO);
+  const d = $('drawer');
+  d.style.visibility = 'visible';
+  d.classList.add('open');
+  syncForm(); renderStats();
+}
+function closeDrawer(){
+  const d = $('drawer');
+  d.classList.remove('open');
+  clearTimeout(fermetureDrawerTO);
+  fermetureDrawerTO = setTimeout(() => {
+    if (!d.classList.contains('open')) d.style.visibility = 'hidden';
+  }, 230);   // au-delà des .22s du glissement, pour ne pas couper l'animation
+}
 
 function syncForm(){
   $('inCenter').value  = fmtLatLon(S.set.zone);
