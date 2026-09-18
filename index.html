@@ -207,13 +207,21 @@
   .mk-dr{width:14px;height:14px;color:#0b0f17;opacity:.8}
   .mk-zone{color:var(--cyan);filter:drop-shadow(0 0 3px rgba(0,0,0,.9))}
   .mk-hdg{width:68px;height:68px;pointer-events:none}
-  /* étiquettes de minutage le long de la branche de nav */
+  /* Minutage le long de la branche : texte nu (pas d'encart), un halo clair en
+     text-shadow tient lieu de fond pour rester lisible sur tout le terrain. */
   .lbl{
-    font-family:var(--mono);font-size:11px;font-weight:600;line-height:1;
-    color:#10161c;background:rgba(255,255,255,.86);border:1px solid rgba(16,22,28,.4);
-    border-radius:4px;padding:2px 4px;white-space:nowrap;pointer-events:none;
+    font-family:var(--mono);font-size:12px;font-weight:700;line-height:1;
+    color:#10161c;white-space:nowrap;pointer-events:none;
+    text-shadow:
+      0 0 3px #fff, 0 0 3px #fff, 1px 1px 0 #fff, -1px -1px 0 #fff,
+      1px -1px 0 #fff, -1px 1px 0 #fff;
   }
-  .lbl-ab{font-size:12px;background:#10161c;color:#fff;border-color:#10161c;padding:2px 6px}
+  /* Points de départ et d'arrivée de la branche : ronds pleins, sans étiquette. */
+  .mk-leg-pt{
+    width:11px;height:11px;border-radius:50%;
+    background:#10161c;border:2px solid #fff;
+    box-shadow:0 0 2px rgba(0,0,0,.5);pointer-events:none;
+  }
   .maplibregl-ctrl-attrib{font-size:10px}
 
   .toast{
@@ -334,8 +342,6 @@
       <div id="grpBranche" hidden>
         <div class="row"><span>Durée de la branche</span>
           <input type="number" id="inLegMin" min="6" max="60" step="1"> <span class="unit">min</span></div>
-        <div class="row"><span>Top toutes les</span>
-          <input type="number" id="inTop" min="1" max="10" step="1"> <span class="unit">min</span></div>
         <div class="row"><span>Balayage droite/gauche</span>
           <input type="number" id="inSweep" min="20" max="175" step="5"> <span class="unit">°</span></div>
         <div class="row"><span>Tracer le cercle</span><input type="checkbox" id="inShowCircle"></div>
@@ -604,7 +610,7 @@ const DEFAULTS = {
   altFt:500, fov:55, chartUp:'route',
   source:'url', urlMaxZoom:11,
   urlTuiles:'https://StehlP.github.io/Nav-ID-trainer/tuiles/{z}/{x}/{y}.png',
-  mode:'cercle', legMin:18, topMin:1, showCircle:false, sweepMax:110,
+  mode:'cercle', legMin:18, showCircle:false, sweepMax:110,
   fixedHdg:null
 };
 
@@ -740,17 +746,11 @@ function initChartLayers(){
 
   chart.addSource('leg',  { type:'geojson', data:EMPTY });
   chart.addSource('tops', { type:'geojson', data:EMPTY });
-  // Trait de nav facon crayon : halo clair puis trait sombre, lisible sur toutes
-  // les teintes de la carte.
-  chart.addLayer({ id:'leg-casing', type:'line', source:'leg',
-    paint:{ 'line-color':'#ffffff', 'line-width':5.5, 'line-opacity':0.75 } });
+  // Trait de nav facon crayon : noir direct, sans halo clair.
   chart.addLayer({ id:'leg-line', type:'line', source:'leg',
     paint:{ 'line-color':'#10161c', 'line-width':2.4 } });
-  chart.addLayer({ id:'tops-casing', type:'line', source:'tops',
-    paint:{ 'line-color':'#ffffff', 'line-width':4.5, 'line-opacity':0.75 } });
   chart.addLayer({ id:'tops-line', type:'line', source:'tops',
-    paint:{ 'line-color':'#10161c',
-            'line-width':['case', ['get','gros'], 2.2, 1.4] } });
+    paint:{ 'line-color':'#10161c', 'line-width':1.6 } });
 
   chart.addLayer({ id:'circle-fill', type:'fill', source:'circle',
     paint:{ 'fill-color':'#d0006f', 'fill-opacity':0.07 } });
@@ -1006,7 +1006,8 @@ async function genererBranche(){
     const dr = randomInDisc(S.set.zone, S.set.zoneR * NM);          // position estimée
     const a  = rhumbDest(dr.lat, dr.lon, route + 180, gs * chrono / 60 * NM);
     const b  = rhumbDest(a.lat, a.lon, route, gs * dureeMin / 60 * NM);
-    const leg = { a, b, route, gs, dureeMin };
+    const coteTop = Math.random() < 0.5 ? 1 : -1;   // minutage à droite ou à gauche, au hasard
+    const leg = { a, b, route, gs, dureeMin, coteTop };
     // Le centre fait foi : on le reprend sur la branche construite, pour qu'il
     // tombe exactement sur le trait et sur le minutage affiches.
     const centre = pointSurBranche(leg, chrono);
@@ -1096,29 +1097,46 @@ function mmss(min){
   return String(Math.floor(t / 60)).padStart(2,'0') + ':' + String(t % 60).padStart(2,'0');
 }
 
-/** Traits perpendiculaires de minutage le long de la branche. */
+// Minutage : un trait par minute entière, d'un seul côté de la branche (celui
+// tiré au sort à la génération). Minute impaire -> trait court ; minute paire
+// -> trait deux fois plus long, complété par le numéro de la minute en texte
+// nu, planté juste au-delà de la pointe du trait.
+const TOP_ECART   = 0.10 * NM;   // espace laissé entre le trait de branche et le repère
+const TOP_COURT   = 0.30 * NM;   // longueur d'un repère de minute impaire
+const TOP_LONG    = TOP_COURT * 2;
+const TOP_LABEL_MARGE = 0.10 * NM;
+
+/** Traits de minutage le long de la branche : un par minute entière. */
 function topsDeBranche(leg){
   const traits = [], labels = [];
-  const pas = Math.max(1, S.set.topMin);
-  for (let m = pas; m < leg.dureeMin - 0.01; m += pas){
+  const cote = leg.coteTop === -1 ? -90 : 90;   // le même côté sur toute la branche
+  for (let m = 1; m < leg.dureeMin - 0.01; m++){
     const p = pointSurBranche(leg, m);
-    const gros = (m % 5 === 0);
-    const demi = (gros ? 0.75 : 0.38) * NM;
-    const g = destPoint(p.lat, p.lon, leg.route - 90, demi);
-    const d = destPoint(p.lat, p.lon, leg.route + 90, demi);
-    traits.push({ type:'Feature', properties:{ gros },
-                  geometry:{ type:'LineString', coordinates:[[g.lon,g.lat],[d.lon,d.lat]] } });
-    if (gros) labels.push({ min:m, pos:destPoint(p.lat, p.lon, leg.route + 90, demi * 1.45) });
+    const paire = (m % 2 === 0);
+    const longueur = paire ? TOP_LONG : TOP_COURT;
+    const debut = destPoint(p.lat, p.lon, leg.route + cote, TOP_ECART);
+    const fin   = destPoint(p.lat, p.lon, leg.route + cote, TOP_ECART + longueur);
+    traits.push({ type:'Feature', properties:{ paire },
+                  geometry:{ type:'LineString', coordinates:[[debut.lon,debut.lat],[fin.lon,fin.lat]] } });
+    if (paire) labels.push({ min:m,
+      pos:destPoint(p.lat, p.lon, leg.route + cote, TOP_ECART + longueur + TOP_LABEL_MARGE) });
   }
   return { traits, labels };
 }
 
 let etiquettes = [];                 // marqueurs de minutage, recrees a chaque manche
 
-function etiquette(texte, cls){
+function etiquette(texte){
   const el = document.createElement('div');
-  el.className = 'lbl ' + (cls || '');
+  el.className = 'lbl';
   el.textContent = texte;
+  return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
+}
+
+/** Point plein qui marque le départ ou l'arrivée de la branche. */
+function pointBranche(){
+  const el = document.createElement('div');
+  el.className = 'mk-leg-pt';
   return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
 }
 
@@ -1139,9 +1157,9 @@ function dessinerBranche(){
   chart.getSource('tops').setData({ type:'FeatureCollection', features:traits });
 
   for (const l of labels)
-    etiquettes.push(etiquette(String(l.min), '').setLngLat([l.pos.lon, l.pos.lat]).addTo(chart));
-  etiquettes.push(etiquette('A', 'lbl-ab').setLngLat([leg.a.lon, leg.a.lat]).addTo(chart));
-  etiquettes.push(etiquette('B', 'lbl-ab').setLngLat([leg.b.lon, leg.b.lat]).addTo(chart));
+    etiquettes.push(etiquette(String(l.min)).setLngLat([l.pos.lon, l.pos.lat]).addTo(chart));
+  etiquettes.push(pointBranche().setLngLat([leg.a.lon, leg.a.lat]).addTo(chart));
+  etiquettes.push(pointBranche().setLngLat([leg.b.lon, leg.b.lat]).addTo(chart));
 }
 
 /** Libertes de la vue 3D selon le mode : en branche on ne balaie que le secteur
@@ -1461,7 +1479,6 @@ function syncForm(){
   $('inCircleMode').value = S.set.circleMode;
   $('inMode').value        = S.set.mode;
   $('inLegMin').value      = S.set.legMin;
-  $('inTop').value         = S.set.topMin;
   $('inSweep').value       = S.set.sweepMax;
   $('inShowCircle').checked= S.set.showCircle;
   $('grpBranche').hidden   = S.set.mode !== 'branche';
@@ -1498,7 +1515,6 @@ function onSettingChange(){
   const modeAvant = S.set.mode;
   S.set.mode       = $('inMode').value;
   S.set.legMin     = clamp(+$('inLegMin').value || 18, 6, 60);
-  S.set.topMin     = clamp(+$('inTop').value || 1, 1, 10);
   S.set.sweepMax   = clamp(+$('inSweep').value || 110, 20, 175);
   S.set.showCircle = $('inShowCircle').checked;
 
@@ -1524,7 +1540,7 @@ function onSettingChange(){
 }
 
 ['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inFov','inHdg','inCenter',
- 'inSource','inUrl','inUrlZ','inMode','inLegMin','inTop','inSweep','inShowCircle']
+ 'inSource','inUrl','inUrlZ','inMode','inLegMin','inSweep','inShowCircle']
   .forEach(id => {
     const el = $(id);
     el.addEventListener('change', onSettingChange);
