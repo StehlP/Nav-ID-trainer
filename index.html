@@ -201,11 +201,11 @@
 
   /* ---------- réglette d'étalonnage ---------- */
   #reglette{padding:10px 0 4px}
+  /* Largeur posée en JS : l'unité CSS « mm » n'est qu'un alias de px et ne
+     mesure rien de physique, c'est l'étalonnage qui donne la vraie échelle. */
   #regletteBar{
-    /* 50mm en CSS est défini exactement comme 96×50/25,4 px : c'est notre étalon.
-       (Pas 100 mm : ça déborderait du tiroir, dont la largeur est plus petite.) */
-    width:50mm;height:14px;background:var(--cyan);border-radius:2px;
-    background-image:repeating-linear-gradient(90deg, rgba(11,15,23,.55) 0 1px, transparent 1px 20%);
+    height:14px;background:var(--cyan);border-radius:2px;
+    background-image:repeating-linear-gradient(90deg, rgba(11,15,23,.55) 0 1px, transparent 1px 25%);
   }
 
   /* ---------- marqueurs carte ---------- */
@@ -414,9 +414,11 @@
       <div class="row"><span>Comptée au-dessus</span>
         <select id="inHauteurRef">
           <option value="point">du point survolé</option>
-          <option value="sommet">du plus haut dans 150 m</option>
+          <option value="sommet">du plus haut aux alentours</option>
         </select>
       </div>
+      <div class="row" id="rowSommetRayon"><span>Rayon de recherche</span>
+        <input type="number" id="inSommetRayon" min="50" max="2000" step="50"> <span class="unit">m</span></div>
       <div class="row"><span>Champ de vision</span><input type="range" id="inFov" min="25" max="80" step="1"> <b id="fovVal"></b></div>
       <div class="row"><span>Cap imposé</span><input type="number" id="inHdg" min="0" max="359" step="1" placeholder="aléatoire"></div>
       <p class="muted">Laissez le cap vide pour un tirage aléatoire à chaque manche.</p>
@@ -424,12 +426,13 @@
 
     <div class="grp">
       <h3>Étalonnage de l'échelle réelle</h3>
-      <p class="muted">Le bouton <b>1:500k</b> suppose qu'un pixel d'écran vaut 1/96 de pouce —
-        juste sur un écran réglé normalement, mais à quelques % près selon la dalle. Posez une
-        règle sur le trait ci-dessous et indiquez ce qu'elle mesure vraiment.</p>
+      <p class="muted">La densité de votre écran est estimée automatiquement. Pour vérifier :
+        le trait ci-dessous devrait mesurer <b>exactement 40 mm</b> à la règle. S'il tombe juste,
+        rien à faire. Sinon, indiquez ce que vous lisez — <b>à refaire sur chaque appareil</b>,
+        l'étalonnage ne se partage pas entre un PC et une tablette.</p>
       <div id="reglette"><div id="regletteBar"></div></div>
       <div class="row" style="margin-top:8px"><span>Longueur mesurée</span>
-        <input type="number" id="inEtalon" min="30" max="75" step="0.5"> <span class="unit">mm</span></div>
+        <input type="number" id="inEtalon" min="10" max="120" step="0.5"> <span class="unit">mm</span></div>
       <button class="btn full" id="btnValiderEtalon">Valider l'étalonnage</button>
       <div class="readout" id="etalonInfo" style="margin-top:8px"></div>
     </div>
@@ -642,10 +645,10 @@ const DEFAULTS = {
   zoneV:2,                             // version de la zone par défaut (voir loadState)
   gs:130, timeMin:1, radiusNM:2.17, direct:false,
   circleMode:'dr',
-  altFt:500, fov:55, chartUp:'route', hauteurRef:'point',
+  altFt:500, fov:55, chartUp:'route', hauteurRef:'sommet', sommetRayon:500, hauteurRefV:1,
   source:'url', urlMaxZoom:11,
   urlTuiles:'https://StehlP.github.io/Nav-ID-trainer/tuiles/{z}/{x}/{y}.png',
-  mode:'cercle', legMin:18, showCircle:false, sweepMax:110, echelleCal:1,
+  mode:'cercle', legMin:18, showCircle:false, sweepMax:110, echelleCal:1, echelleCalManuel:false,
   fixedHdg:null
 };
 
@@ -692,6 +695,17 @@ function loadState(){
       S.set.zone  = DEFAULTS.zone;
       S.set.zoneR = DEFAULTS.zoneR;
       S.set.zoneV = DEFAULTS.zoneV;
+    }
+    // Même bascule pour la référence de hauteur : 'sommet' à 500 m devient
+    // le défaut, une seule fois.
+    // Tant que l'utilisateur n'a pas étalonné à la main, on suit la détection
+    // automatique : elle est quasi exacte sur les appareils Apple, approchée
+    // ailleurs, et de toute façon bien meilleure que 96 ppp en dur.
+    if (!S.set.echelleCalManuel) S.set.echelleCal = 96 / densiteEcran().ppp;
+    if (s && s.hauteurRefV !== DEFAULTS.hauteurRefV){
+      S.set.hauteurRef   = DEFAULTS.hauteurRef;
+      S.set.sommetRayon  = DEFAULTS.sommetRayon;
+      S.set.hauteurRefV  = DEFAULTS.hauteurRefV;
     }
     const h = JSON.parse(localStorage.getItem(LS_HIST) || 'null');
     if (Array.isArray(h)) S.hist = h;
@@ -995,20 +1009,6 @@ function updateLookHud(){
     if (S.round) updateCamera();
   });
 
-  window.addEventListener('keydown', ev => {
-    if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
-    const k = ev.key.toLowerCase();
-    const c = contraintesVue();
-    if (k === 'r'){ recentrerRegard(); }
-    else if (ev.key === 'ArrowLeft')  { S.view.rel = clamp(S.view.rel - 5, -c.relMax, c.relMax); updateCamera(); }
-    else if (ev.key === 'ArrowRight') { S.view.rel = clamp(S.view.rel + 5, -c.relMax, c.relMax); updateCamera(); }
-    else if (ev.key === 'ArrowUp')    { if (c.siteFixe == null){ S.view.site = clamp(S.view.site - 2, 4, 75); updateCamera(); } }
-    else if (ev.key === 'ArrowDown')  { if (c.siteFixe == null){ S.view.site = clamp(S.view.site + 2, 4, 75); updateCamera(); } }
-    else if (k === 'n' && S.mode !== 'intro'){ newRound(); }
-    else if (ev.key === 'Enter' && S.mode === 'play' && S.round.guess){ validate(); }
-    else return;
-    ev.preventDefault();
-  });
 })();
 
 /* ==========================================================================
@@ -1024,33 +1024,38 @@ function toast(msg, ms = 2200){
    ---------------------------------------------------------------------------
    Deux façons de compter la hauteur sol :
      'point'  — le terrain à l'aplomb, littéral ;
-     'sommet' — le point le plus haut dans un rayon de 150 m, ce qu'on applique
-                réellement en vol : la hauteur de survol se compte sur
-                l'obstacle, pas sur le creux qu'on a sous le ventre.
-   Le motif d'échantillonnage est un quadrillage de 25 m sur le disque, calculé
-   une fois pour toutes puis réutilisé (≈130 points).
+     'sommet' — le point le plus haut dans un rayon réglable (S.set.sommetRayon),
+                ce qu'on applique réellement en vol : la hauteur de survol se
+                compte sur l'obstacle, pas sur le creux qu'on a sous le ventre.
+   Le motif d'échantillonnage est un quadrillage sur le disque ; son pas est
+   proportionnel au rayon (rayon/6) pour garder un nombre de points raisonnable
+   quel que soit le réglage, et mis en cache par rayon pour ne pas le
+   recalculer à chaque manche.
    --------------------------------------------------------------------------- */
-const SOMMET_RAYON = 150;    // m
-const SOMMET_PAS   = 25;     // m
-const SOMMET_ZOOM  = 14;     // MNT le plus fin disponible : ~7 m/px
+const SOMMET_ZOOM = 14;     // MNT le plus fin disponible : ~7 m/px
+const motifsSommet = new Map();
 
-const MOTIF_SOMMET = (() => {
+function motifSommet(rayon){
+  const cle = Math.round(rayon);
+  if (motifsSommet.has(cle)) return motifsSommet.get(cle);
+  const pas = Math.max(15, rayon / 6);
   const pts = [];
-  for (let dx = -SOMMET_RAYON; dx <= SOMMET_RAYON; dx += SOMMET_PAS)
-    for (let dy = -SOMMET_RAYON; dy <= SOMMET_RAYON; dy += SOMMET_PAS){
+  for (let dx = -rayon; dx <= rayon; dx += pas)
+    for (let dy = -rayon; dy <= rayon; dy += pas){
       const d = Math.hypot(dx, dy);
-      if (d > 0 && d <= SOMMET_RAYON)
+      if (d > 0 && d <= rayon)
         pts.push({ brg: norm360(deg(Math.atan2(dx, dy))), d });
     }
+  motifsSommet.set(cle, pts);
   return pts;
-})();
+}
 
 /** Altitude de référence, lue dans les tuiles MNT (à la génération d'une manche). */
 async function altitudeReference(lat, lon){
   const direct = await demElevation(lat, lon, SOMMET_ZOOM);
   if (S.set.hauteurRef !== 'sommet' || direct == null) return direct;
   let max = direct;
-  for (const p of MOTIF_SOMMET){
+  for (const p of motifSommet(S.set.sommetRayon)){
     const q = destPoint(lat, lon, p.brg, p.d);
     const e = await demElevation(q.lat, q.lon, SOMMET_ZOOM);
     if (e != null && e > max) max = e;
@@ -1065,7 +1070,7 @@ function altitudeReferenceTerrain(lat, lon){
   if (direct == null || !isFinite(direct)) return null;
   if (S.set.hauteurRef !== 'sommet') return direct;
   let max = direct;
-  for (const p of MOTIF_SOMMET){
+  for (const p of motifSommet(S.set.sommetRayon)){
     const q = destPoint(lat, lon, p.brg, p.d);
     const e = map3d.queryTerrainElevation([q.lon, q.lat]);
     if (e != null && isFinite(e) && e > max) max = e;
@@ -1448,7 +1453,50 @@ const ECHELLE_CARTE = 500000;
 // quelques % près selon la dalle et le zoom du navigateur, d'où l'étalonnage.
 const M_PAR_PX_ECHELLE_NOMINAL = (25.4 / 96) / 1000 * ECHELLE_CARTE;   // 132,29 m par pixel
 
-const ETALON_MM = 50;   // longueur nominale de la réglette d'étalonnage (voir CSS #regletteBar)
+const ETALON_MM = 40;   // longueur que la réglette doit mesurer si l'étalonnage est bon
+
+/* ---------------------------------------------------------------------------
+   Densité d'écran détectée automatiquement
+   ---------------------------------------------------------------------------
+   Aucune API web ne donne la taille physique d'un écran, et l'unité CSS « mm »
+   n'est qu'un alias de px (1 mm = 96/25,4 px par définition) : elle ne mesure
+   donc rien de physique. Mais on peut déduire la densité autrement.
+
+   Sur les appareils Apple, la définition native (résolution CSS ×
+   devicePixelRatio) identifie le modèle quasiment sans ambiguïté, et la densité
+   de dalle de chaque modèle est publique. On en tire directement le nombre de
+   pixels CSS par pouce : densité de dalle / devicePixelRatio.
+
+   Sur Android, le devicePixelRatio est par construction densité/160, donc la
+   densité CSS vaut ~160 ppp quel que soit l'appareil.
+
+   Sur ordinateur, rien n'est exposé : on garde la convention 96 ppp, qui reste
+   à ~10 % près sur la plupart des moniteurs. L'étalonnage manuel sert à ça.
+   --------------------------------------------------------------------------- */
+const PPP_APPLE = {                 // « largeur×hauteur natives » : ppp de la dalle
+  '1536x2048':264, '1620x2160':264, '1668x2224':264, '1668x2388':264,
+  '1640x2360':264, '2048x2732':264, '1668x2420':264, '2064x2752':264,
+  '1488x2266':326,                                          // iPad mini 6
+  '640x1136':326, '750x1334':326, '828x1792':326,
+  '1080x1920':401, '1125x2436':458, '1242x2688':458, '1284x2778':458,
+  '1080x2340':476, '1170x2532':460, '1179x2556':460,
+  '1290x2796':460, '1206x2622':460, '1320x2868':460
+};
+
+/** Pixels CSS par pouce sur cet écran, et d'où vient l'estimation. */
+function densiteEcran(){
+  const dpr = window.devicePixelRatio || 1;
+  const a = Math.min(screen.width, screen.height);
+  const b = Math.max(screen.width, screen.height);
+  const cle = Math.round(a * dpr) + 'x' + Math.round(b * dpr);
+  const apple = /iPad|iPhone|iPod/.test(navigator.platform || '')
+             || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (apple && PPP_APPLE[cle])
+    return { ppp: PPP_APPLE[cle] / dpr, source: 'modèle Apple reconnu (' + cle + ', ' + PPP_APPLE[cle] + ' ppp)' };
+  if (/Android/.test(navigator.userAgent))
+    return { ppp: 160, source: 'convention Android (160 ppp CSS)' };
+  return { ppp: 96, source: 'convention 96 ppp, non vérifiable sur ordinateur' };
+}
 
 function mParPxEchelle(){
   return M_PAR_PX_ECHELLE_NOMINAL * (S.set.echelleCal || 1);
@@ -1586,7 +1634,8 @@ function updateChips(){
   $('cAlt').textContent   = S.set.altFt + ' ft';
   const bascule = (S.set.altFt === ALT_BASSE) ? ALT_HAUTE : ALT_BASSE;
   $('altTxt').innerHTML = 'Hauteur <b>' + S.set.altFt + ' ft</b> '
-                        + (S.set.hauteurRef === 'sommet' ? '/ sommet' : 'sol');
+                        + (S.set.hauteurRef === 'sommet'
+                           ? '/ sommet ' + S.set.sommetRayon + ' m' : 'sol');
   $('btnAlt').title     = 'Basculer à ' + bascule + ' ft sol';
   const nm = uncertaintyM() / NM;
   $('cRad').textContent   = nm.toFixed(2) + ' NM';
@@ -1670,13 +1719,15 @@ function syncForm(){
   $('inLegMin').value      = S.set.legMin;
   $('inSweep').value       = S.set.sweepMax;
   $('inShowCircle').checked= S.set.showCircle;
-  $('inEtalon').value      = (ETALON_MM * S.set.echelleCal).toFixed(1);
-  $('etalonInfo').innerHTML = (Math.abs(S.set.echelleCal - 1) < 0.001)
-      ? 'Aucun étalonnage appliqué (facteur <b>1,00</b>).'
-      : 'Facteur appliqué : <b>' + S.set.echelleCal.toFixed(3) + '</b> · '
-        + (S.set.echelleCal > 1 ? 'la carte s’affichera un peu plus petite'
-                                 : 'la carte s’affichera un peu plus grande')
-        + ' qu’avec la convention 96 px/pouce.';
+  // La réglette est dessinée pour mesurer ETALON_MM avec l'étalonnage courant.
+  $('regletteBar').style.width = (ETALON_MM * 96 / 25.4 / S.set.echelleCal).toFixed(1) + 'px';
+  $('inEtalon').value = ETALON_MM;
+  const det = densiteEcran();
+  $('etalonInfo').innerHTML =
+      'Densité retenue : <b>' + (96 / S.set.echelleCal).toFixed(0) + ' px CSS/pouce</b><br>'
+    + (S.set.echelleCalManuel
+        ? 'Source : étalonnage manuel sur cet appareil.'
+        : 'Source : détection automatique — ' + det.source + '.');
   $('grpBranche').hidden   = S.set.mode !== 'branche';
   $('inSource').value  = S.set.source;
   $('inUrl').value     = S.set.urlTuiles;
@@ -1685,6 +1736,8 @@ function syncForm(){
   majInfoFond();
   $('inAlt').value     = S.set.altFt;
   $('inHauteurRef').value = S.set.hauteurRef;
+  $('inSommetRayon').value = S.set.sommetRayon;
+  $('rowSommetRayon').hidden = S.set.hauteurRef !== 'sommet';
   $('inFov').value     = S.set.fov;
   $('fovVal').textContent = Math.round(S.set.fov) + '°';
   $('inHdg').value     = S.set.fixedHdg == null ? '' : S.set.fixedHdg;
@@ -1705,8 +1758,10 @@ function onSettingChange(){
   S.set.direct     = $('inDirect').checked;
   S.set.circleMode = $('inCircleMode').value;
   S.set.altFt      = clamp(+$('inAlt').value || 500, 200, 6000);
-  const refAvant   = S.set.hauteurRef;
-  S.set.hauteurRef = $('inHauteurRef').value;
+  const refAvant     = S.set.hauteurRef;
+  const rayonAvant   = S.set.sommetRayon;
+  S.set.hauteurRef   = $('inHauteurRef').value;
+  S.set.sommetRayon  = clamp(+$('inSommetRayon').value || 500, 50, 2000);
   S.set.fov        = clamp(+$('inFov').value || 55, 25, 80);
   const h = $('inHdg').value.trim();
   S.set.fixedHdg   = h === '' ? null : clamp(+h || 0, 0, 359);
@@ -1734,7 +1789,7 @@ function onSettingChange(){
 
   saveSettings(); syncForm(); updateChips();
   map3d.setVerticalFieldOfView(S.set.fov);
-  if (S.set.hauteurRef !== refAvant && S.round){
+  if ((S.set.hauteurRef !== refAvant || S.set.sommetRayon !== rayonAvant) && S.round){
     const e = altitudeReferenceTerrain(S.round.truth.lat, S.round.truth.lon);
     if (e != null) S.round.groundElev = e;
   }
@@ -1747,7 +1802,7 @@ function onSettingChange(){
   if (S.set.mode !== modeAvant && (S.mode === 'play' || S.mode === 'debrief')) newRound();
 }
 
-['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inHauteurRef','inFov','inHdg','inCenter',
+['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inHauteurRef','inSommetRayon','inFov','inHdg','inCenter',
  'inSource','inUrl','inUrlZ','inMode','inLegMin','inSweep','inShowCircle']
   .forEach(id => {
     const el = $(id);
@@ -1802,11 +1857,15 @@ $('btnResetStats').onclick = () => { S.hist = []; saveHist(); renderStats(); upd
 
 $('btnValiderEtalon').onclick = () => {
   const mm = +$('inEtalon').value;
-  if (!isFinite(mm) || mm < 20 || mm > 90){ toast('Longueur mesurée invalide'); return; }
-  S.set.echelleCal = mm / ETALON_MM;
+  if (!isFinite(mm) || mm < 5 || mm > 200){ toast('Longueur mesurée invalide'); return; }
+  // Correction relative : la réglette était censée mesurer ETALON_MM, elle en
+  // mesure mm — le facteur se corrige donc du même rapport, et une seule passe
+  // suffit quel que soit le point de départ.
+  S.set.echelleCal *= mm / ETALON_MM;
+  S.set.echelleCalManuel = true;
   saveSettings(); syncForm();
   if (S.round) cadrerManche(true);   // la carte reflète l'étalonnage tout de suite
-  toast('Étalonnage enregistré : facteur ' + S.set.echelleCal.toFixed(3));
+  toast('Étalonné : ' + (96 / S.set.echelleCal).toFixed(0) + ' px CSS/pouce');
 };
 
 $('zoneRange').oninput = () => {
@@ -1864,6 +1923,13 @@ $('btnIntroZone').onclick = () => { enterZoneMode(); };
     if (!isFinite(pct)) return;
     pane.style.flexBasis = (clamp(pct, 0.15, 0.85) * 100).toFixed(1) + '%';
     map3d.resize(); chart.resize();
+    // La caméra 3D est calculée pour une distance œil-cible qui dépend du champ
+    // de vision vertical ET de la hauteur du panneau : changer cette hauteur
+    // (disposition empilée) invalide donc le zoom déjà posé, même si la
+    // position géographique visée n'a pas bougé. Sans ce recalcul, la vue
+    // dérive jusqu'à ce qu'on tourne la caméra (qui, elle, rappelle
+    // updateCamera() et corrige tout d'un coup).
+    if (S.round) updateCamera();
   });
   sp.addEventListener('pointerup', e => {
     dragging = false;
@@ -1871,7 +1937,10 @@ $('btnIntroZone').onclick = () => { enterZoneMode(); };
   });
 })();
 
-window.addEventListener('resize', () => { map3d.resize(); chart.resize(); });
+window.addEventListener('resize', () => {
+  map3d.resize(); chart.resize();
+  if (S.round) updateCamera();   // même raison que dans setupSplitter() ci-dessus
+});
 
 /* ---- graduations de la rose ---- */
 (function buildRose(){
