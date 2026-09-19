@@ -244,6 +244,19 @@
     content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;
     border-radius:50%;background:var(--amber);
   }
+  /* Le même repère, mais posé dans la vue 3D : ce n'est pas un marqueur
+     MapLibre (ses marqueurs ignorent le relief, cf. ecranDepuisSol) mais un
+     simple élément qu'on positionne nous-mêmes à chaque image. */
+  #vise3d{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;
+    pointer-events:none;z-index:3}
+  #vise3d .anneau{position:absolute;inset:0;border-radius:50%;border:3px solid var(--amber);
+    box-shadow:0 0 0 1px rgba(11,15,23,.85), 0 0 6px rgba(0,0,0,.8)}
+  #vise3d .anneau::after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;
+    margin:-1.5px 0 0 -1.5px;border-radius:50%;background:var(--amber)}
+  /* Point caché derrière un relief : on le montre quand même, en estompé —
+     sinon on croirait que le report a échoué. */
+  #vise3d.masque{opacity:.4}
+  #vise3d.masque .anneau{border-style:dashed}
   /* Poignée de rayon : un rond plein, pas la croix des autres repères — bien
      distinct visuellement, pour signaler qu'on peut le tirer pour agrandir
      ou réduire le cercle de zone. */
@@ -293,6 +306,7 @@
 <main id="stage">
   <section id="pane3d">
     <div id="map3d"></div>
+    <div id="vise3d" hidden><span class="anneau"></span></div>
 
     <div class="ov card" id="lookInfo">
       <div class="big">Regard <span id="lkClock">12 h</span> · <span id="lkAz">—</span></div>
@@ -1119,6 +1133,7 @@ function updateCamera(){
   map3d.jumpTo(cam);
   if (S.set.chartUp === 'regard') chart.setBearing(chartBearing());
   updateLookHud();
+  majVise3D();
 }
 
 /* --------------------------------------------------------------------------
@@ -1131,30 +1146,49 @@ function updateCamera(){
    On le fait donc nous-mêmes, ce qui est possible parce qu'on connaît notre
    caméra exactement — c'est nous qui la plaçons dans updateCamera().
    -------------------------------------------------------------------------- */
-function solSousLeClic(x, y){
+/** Le repère de la caméra, en local est/nord/haut, plus de quoi convertir
+ *  angles et pixels. Partagé par les deux sens de conversion — écran vers sol
+ *  et sol vers écran — pour qu'ils ne puissent pas diverger. */
+function repereCamera(){
   const r = S.round;
   if (!r) return null;
   const cv = map3d.getCanvas();
   const W = cv.clientWidth, H = cv.clientHeight;
   if (!W || !H) return null;
 
-  const agl    = S.set.altFt * FT;
-  const camAlt = r.groundElev + agl;
-  const c      = contraintesVue();
-  const site   = c.siteFixe != null ? c.siteFixe : clamp(S.view.site, 4, 75);
-  const az     = norm360(r.heading + S.view.rel);
+  const c    = contraintesVue();
+  const site = c.siteFixe != null ? c.siteFixe : clamp(S.view.site, 4, 75);
+  const az   = norm360(r.heading + S.view.rel);
+  const sa = Math.sin(rad(az)),   ca = Math.cos(rad(az));
+  const ss = Math.sin(rad(site)), cs = Math.cos(rad(site));
+  return {
+    W, H,
+    camAlt: r.groundElev + S.set.altFt * FT,
+    // Le champ de vision est vertical : les deux axes écran se ramènent donc
+    // à la demi-hauteur.
+    t: Math.tan(rad(S.set.fov / 2)),
+    F: [ sa * cs,  ca * cs, -ss ],           // avant, plongeant de « site »
+    R: [ ca,      -sa,       0  ],           // droite
+    U: [ sa * ss,  ca * ss,  cs ],           // haut caméra (R ^ F)
+  };
+}
 
-  // Direction du rayon dans le repère caméra, puis passage en repère local
-  // est/nord/haut. Le champ de vision est vertical : les deux axes écran se
-  // ramènent donc à la demi-hauteur.
-  const t = Math.tan(rad(S.set.fov / 2));
+/** Altitude du terrain, avec repli sur celle de l'avion quand la tuile de
+ *  relief n'est pas encore là. */
+function solEn(lat, lon){
+  const e = map3d.queryTerrainElevation([lon, lat]);
+  return (e == null || !isFinite(e)) ? S.round.groundElev : e;
+}
+
+function solSousLeClic(x, y){
+  const r = S.round;
+  const cam = repereCamera();
+  if (!r || !cam) return null;
+  const { W, H, t, F, R, U, camAlt } = cam;
+
+  // Direction du rayon dans le repère caméra, puis passage en est/nord/haut.
   const nx = (x - W / 2) / (H / 2) * t;      // droite
   const ny = -(y - H / 2) / (H / 2) * t;     // haut (l'écran compte vers le bas)
-  const sa = Math.sin(rad(az)), ca = Math.cos(rad(az));
-  const ss = Math.sin(rad(site)), cs = Math.cos(rad(site));
-  const F = [ sa * cs,  ca * cs, -ss ];      // avant, plongeant de « site »
-  const R = [ ca,      -sa,       0  ];      // droite
-  const U = [ sa * ss,  ca * ss,  cs ];      // haut caméra (R ^ F)
   let dE = nx * R[0] + ny * U[0] + F[0];
   let dN = nx * R[1] + ny * U[1] + F[1];
   let dU = nx * R[2] + ny * U[2] + F[2];
@@ -1167,8 +1201,7 @@ function solSousLeClic(x, y){
   const brg = norm360(deg(Math.atan2(dE, dN)));
   const solA = s => {                        // altitude du terrain à la distance s
     const p = destPoint(r.truth.lat, r.truth.lon, brg, s * hor);
-    const e = map3d.queryTerrainElevation([p.lon, p.lat]);
-    return { p, sol: (e == null || !isFinite(e)) ? r.groundElev : e };
+    return { p, sol: solEn(p.lat, p.lon) };
   };
 
   // Marche vers l'avant jusqu'à passer sous le terrain, puis dichotomie.
@@ -1188,6 +1221,76 @@ function solSousLeClic(x, y){
   }
   const fin = solA(hi);
   return { lat: fin.p.lat, lon: fin.p.lon, dist: hi * hor };
+}
+
+/** Le chemin inverse : où, dans la vue 3D, se projette un point du sol.
+ *  On ne passe pas par map3d.project() — c'est le même défaut que pour
+ *  unproject(), il ignore le relief, donc un point de vallée et un point de
+ *  crête au même endroit sortiraient au même pixel. */
+function ecranDepuisSol(lat, lon){
+  const r = S.round;
+  const cam = repereCamera();
+  if (!r || !cam) return null;
+  const { W, H, t, F, R, U, camAlt } = cam;
+
+  const d   = distance(r.truth, { lat, lon });
+  const brg = bearingTo(r.truth, { lat, lon });
+  const v = [ d * Math.sin(rad(brg)), d * Math.cos(rad(brg)), solEn(lat, lon) - camAlt ];
+  const avant = v[0] * F[0] + v[1] * F[1] + v[2] * F[2];
+  if (avant < 1) return null;                // derrière la caméra
+  const droite = v[0] * R[0] + v[1] * R[1] + v[2] * R[2];
+  const haut   = v[0] * U[0] + v[1] * U[1] + v[2] * U[2];
+  return {
+    x: W / 2 + (droite / avant) / t * (H / 2),
+    y: H / 2 - (haut   / avant) / t * (H / 2),
+    dist: d,
+  };
+}
+
+/** Le relief coupe-t-il la ligne de vue ? Sinon on afficherait un repère bien
+ *  net sur une colline qui cache le point. */
+function estMasque(lat, lon){
+  const r = S.round;
+  const camAlt = r.groundElev + S.set.altFt * FT;
+  const d   = distance(r.truth, { lat, lon });
+  const brg = bearingTo(r.truth, { lat, lon });
+  const solFin = solEn(lat, lon);
+  const N = 40;
+  for (let i = 1; i < N; i++){
+    const fr = i / N;
+    const q = destPoint(r.truth.lat, r.truth.lon, brg, d * fr);
+    // 15 m de marge : la résolution du MNT ne mérite pas mieux.
+    if (solEn(q.lat, q.lon) > camAlt + (solFin - camAlt) * fr + 15) return true;
+  }
+  return false;
+}
+
+/** Le point désigné, commun aux deux vues : null quand il n'y en a pas. */
+let pointVise = null;
+
+/** Repositionne le repère 3D. Appelé à chaque mouvement de caméra, donc il
+ *  doit rester bon marché — d'où l'occlusion calculée une fois, à la pose. */
+function majVise3D(){
+  const el = $('vise3d');
+  if (!el) return;
+  if (!pointVise || S.mode !== 'debrief'){ el.hidden = true; return; }
+  const p   = ecranDepuisSol(pointVise.lat, pointVise.lon);
+  const cam = repereCamera();
+  // On tolère un léger débord : un repère à moitié sorti reste une indication.
+  if (!p || !cam || p.x < -30 || p.y < -30 || p.x > cam.W + 30 || p.y > cam.H + 30){
+    el.hidden = true; return;
+  }
+  el.hidden = false;
+  el.style.left = p.x.toFixed(1) + 'px';
+  el.style.top  = p.y.toFixed(1) + 'px';
+  el.classList.toggle('masque', !!pointVise.masque);
+}
+
+/** Pose le point désigné dans les deux vues à la fois. */
+function viser(p){
+  pointVise = { lat:p.lat, lon:p.lon, masque:estMasque(p.lat, p.lon) };
+  showMarker(mkVise, true, p);
+  majVise3D();
 }
 
 function updateLookHud(){
@@ -1437,6 +1540,7 @@ async function newRound(){
   showMarker(mkZone, false);
   showMarker(mkHdg, false);
   showMarker(mkVise, false);
+  pointVise = null; majVise3D();
 
   chart.setBearing(chartBearing());
   cadrerManche(false);
@@ -1816,7 +1920,7 @@ function pointerDansLaVue3D(clientX, clientY){
   const r = map3d.getCanvas().getBoundingClientRect();
   const p = solSousLeClic(clientX - r.left, clientY - r.top);
   if (!p){ toast('Visez le sol, pas le ciel'); return; }
-  showMarker(mkVise, true, p);
+  viser(p);
   const d = distance(S.round.truth, p);
   toast('Point visé reporté sur la carte — ' + (d / NM).toFixed(2) + ' NM devant vous');
 }
@@ -1826,6 +1930,26 @@ chart.on('click', ev => {
   const p = { lat:ev.lngLat.lat, lon:ev.lngLat.lng };
   if (S.mode === 'zone'){
     S.set.zone = p; saveSettings(); drawZone(); syncForm();
+    return;
+  }
+  // Au débriefing, le sens inverse du clic 3D : « ce point de la carte, où
+  // est-il dans le paysage ? ». Si le regard est ailleurs, on l'y tourne —
+  // sans quoi le report semblerait ne rien faire.
+  if (S.mode === 'debrief'){
+    const c = contraintesVue();
+    const ecart = ((bearingTo(S.round.truth, p) - S.round.heading + 540) % 360) - 180;
+    const cam = repereCamera();
+    // Demi-champ horizontal : le réglage « champ » est vertical, d'où le
+    // rapport des côtés du canevas.
+    const demi = cam ? deg(Math.atan(cam.t * cam.W / cam.H)) : 30;
+    if (Math.abs(ecart - S.view.rel) > demi * 0.8){
+      S.view.rel = clamp(ecart, -c.relMax, c.relMax);
+      updateCamera();
+    }
+    viser(p);
+    toast($('vise3d').hidden ? 'Point hors du champ de la vue 3D'
+        : pointVise.masque   ? 'Point reporté dans la vue 3D — masqué par le relief'
+        :                      'Point reporté dans la vue 3D');
     return;
   }
   if (S.mode !== 'play') return;
