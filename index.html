@@ -101,6 +101,11 @@
   #btnAlt:hover svg{opacity:1}
 
   #incertitudeInfo{top:10px;left:10px;font-size:12px;color:var(--txt2);padding:7px 11px}
+  #chronoMap{
+    top:10px;left:50%;transform:translateX(-50%);
+    font-size:13px;color:var(--txt2);padding:7px 14px;text-align:center;
+  }
+  #chronoMap b{font-family:var(--mono);color:var(--cyan);font-size:16px;font-weight:600}
   #incertitudeInfo b{font-family:var(--mono);color:var(--cyan);font-weight:600;font-size:13px}
   #chartTools{top:10px;right:10px;display:flex;flex-direction:column;gap:5px;align-items:flex-end}
   #chartTools .btn{padding:5px 9px;font-size:12px;background:rgba(18,24,38,.88);backdrop-filter:blur(6px)}
@@ -227,6 +232,28 @@
   .mk-truth{color:var(--red);filter:drop-shadow(0 0 3px rgba(0,0,0,.85))}
   .mk-dr{width:14px;height:14px;color:#0b0f17;opacity:.8}
   .mk-zone{color:var(--cyan);filter:drop-shadow(0 0 3px rgba(0,0,0,.9))}
+  /* Point désigné en cliquant dans la vue 3D, reporté sur la carte : un rond
+     évidé, pour ne se confondre ni avec les croix ni avec la poignée pleine. */
+  .mk-vise{width:22px;height:22px;pointer-events:none}
+  .mk-vise::before,.mk-vise::after{content:none}
+  .mk-vise .cible{
+    position:absolute;inset:0;border-radius:50%;
+    border:3px solid var(--amber);box-shadow:0 0 0 1px rgba(11,15,23,.85), 0 0 4px rgba(0,0,0,.8);
+  }
+  .mk-vise .cible::after{
+    content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;
+    border-radius:50%;background:var(--amber);
+  }
+  /* Poignée de rayon : un rond plein, pas la croix des autres repères — bien
+     distinct visuellement, pour signaler qu'on peut le tirer pour agrandir
+     ou réduire le cercle de zone. */
+  .mk-zone-r{width:20px;height:20px;pointer-events:none}
+  .mk-zone-r::before,.mk-zone-r::after{content:none}
+  .mk-zone-r .poignee{
+    position:absolute;inset:3px;border-radius:50%;pointer-events:auto;
+    background:var(--cyan);border:2px solid #0b0f17;cursor:ew-resize;
+    filter:drop-shadow(0 0 3px rgba(0,0,0,.9));
+  }
   .mk-hdg{width:68px;height:68px;pointer-events:none}
   /* Minutage le long de la branche : texte nu, noir direct, sans encart ni halo. */
   .lbl{
@@ -268,7 +295,7 @@
     <div id="map3d"></div>
 
     <div class="ov card" id="lookInfo">
-      <div class="big">Regard <span id="lkClock">12 h</span> · <span id="lkAz">—</span><span id="lkChronoWrap" hidden> · Chrono <b id="lkChrono">—</b></span></div>
+      <div class="big">Regard <span id="lkClock">12 h</span> · <span id="lkAz">—</span></div>
       <div class="sub">Cap avion <span id="lkHdg">—</span> · site <span id="lkSite">—</span> · champ <span id="lkFov">—</span></div>
     </div>
 
@@ -305,6 +332,8 @@
     <div id="mapChart"></div>
 
     <div class="ov card" id="incertitudeInfo">Cercle d'incertitude <b>—</b></div>
+
+    <div class="ov card" id="chronoMap" hidden>Chrono <b id="lkChrono">—</b></div>
 
     <div class="ov i" id="chartTools">
       <button class="btn on" id="btnUp" title="Orientation de la carte">Route en haut</button>
@@ -423,6 +452,10 @@
       </div>
       <div class="row" id="rowSommetRayon"><span>Rayon de recherche</span>
         <input type="number" id="inSommetRayon" min="50" max="2000" step="50"> <span class="unit">m</span></div>
+      <div class="row"><span>Précharger la vue 3D</span><input type="checkbox" id="inPrecharge"></div>
+      <p class="muted">Tire à l'avance les tuiles tout autour de l'avion : tourner le regard
+        n'attend plus de chargement. Consomme nettement plus de données — à décocher en
+        connexion mobile.</p>
       <div class="row"><span>Champ de vision</span><input type="range" id="inFov" min="25" max="80" step="1"> <b id="fovVal"></b></div>
       <div class="row"><span>Cap imposé</span><input type="number" id="inHdg" min="0" max="359" step="1" placeholder="aléatoire"></div>
       <p class="muted">Laissez le cap vide pour un tirage aléatoire à chaque manche.</p>
@@ -653,6 +686,7 @@ const DEFAULTS = {
   source:'url', urlMaxZoom:11,
   urlTuiles:'https://StehlP.github.io/Nav-ID-trainer/tuiles/{z}/{x}/{y}.png',
   mode:'cercle', legMin:18, showCircle:false, sweepMax:110, echelleCal:1, echelleCalManuel:false,
+  precharge:true,
   fixedHdg:null
 };
 
@@ -705,7 +739,7 @@ function loadState(){
     // Tant que l'utilisateur n'a pas étalonné à la main, on suit la détection
     // automatique : elle est quasi exacte sur les appareils Apple, approchée
     // ailleurs, et de toute façon bien meilleure que 96 ppp en dur.
-    if (!S.set.echelleCalManuel) S.set.echelleCal = 96 / densiteEcran().ppp;
+    if (!S.set.echelleCalManuel) S.set.echelleCal = clamp(96 / densiteEcran().ppp, 0.3, 3);
     if (s && s.hauteurRefV !== DEFAULTS.hauteurRefV){
       S.set.hauteurRef   = DEFAULTS.hauteurRef;
       S.set.sommetRayon  = DEFAULTS.sommetRayon;
@@ -739,11 +773,21 @@ const map3d = new maplibregl.Map({
   container:'map3d',
   maxPitch:88,
   minZoom:6,
+  // Par défaut MapLibre dimensionne son cache sur la taille du champ courant :
+  // en tournant le regard, les tuiles qu'on vient de quitter sont évincées et
+  // doivent être rechargées au retour. On l'élargit franchement pour garder
+  // tout le tour de l'horizon en mémoire — c'est ce qui rend les allers-retours
+  // du regard instantanés, en complément du préchargement.
+  maxTileCacheSize: 1500,
   attributionControl:{ compact:true },
   style:{
     version:8,
     sources:{
-      ortho:{ type:'raster', tiles:[CFG.ortho], tileSize:256, maxzoom:19, attribution:CFG.attrIGN },
+      // maxzoom volontairement plus bas qu'à plat (19) : à 500 ft et fort
+      // tangage, une vue oblique couvre un empan au sol énorme et réclame
+      // d'un coup un très grand nombre de tuiles à ce niveau de zoom — c'est
+      // ce qui déclenche le plus souvent la limite de débit du service IGN.
+      ortho:{ type:'raster', tiles:[CFG.ortho], tileSize:256, maxzoom:17, attribution:CFG.attrIGN },
       dem  :{ type:'raster-dem', tiles:[CFG.dem], tileSize:256, maxzoom:14,
               encoding:'terrarium', attribution:CFG.attrTerr }
     },
@@ -753,8 +797,16 @@ const map3d = new maplibregl.Map({
     ],
     terrain:{ source:'dem', exaggeration:1 },
     sky:{
+      // horizon-fog-blend nettement remonté : à site 4° (le minimum, utilisé
+      // en mode branche), le regard est presque rasant sur le terrain, et
+      // c'est exactement là qu'apparaissait la texture en bandes verticales
+      // — un artefact de minification extrême, pas un souci de chargement
+      // (raster-resampling est déjà en "linear", MapLibre n'expose rien de
+      // plus fin). Sans levier pour corriger le rendu lui-même, on masque la
+      // zone à risque sous une brume plus dense, ce qui est de toute façon
+      // réaliste à basse altitude.
       'sky-color':'#6fa8de', 'horizon-color':'#d6e4f0', 'fog-color':'#dde8f0',
-      'fog-ground-blend':0.55, 'horizon-fog-blend':0.5,
+      'fog-ground-blend':0.62, 'horizon-fog-blend':0.92,
       'sky-horizon-blend':0.85, 'atmosphere-blend':0.6
     }
   },
@@ -857,7 +909,24 @@ setTimeout(initChartLayers, 1200);
 map3d.on('load',  () => { S.ready.view = true; checkReady(); });
 map3d.once('idle',() => { S.ready.view = true; checkReady(); });
 setTimeout(()   => { S.ready.view = true; checkReady(); }, 6000);
-map3d.on('error', e => { /* tuiles manquantes en bord de couverture : sans conséquence */ });
+// Une tuile ortho/MNT en échec (souvent le service IGN qui limite le débit
+// lors des rafales de la vue 3D) restait un trou noir ou une texture étirée,
+// sans jamais être retentée. setTiles() force MapLibre à vider le cache de la
+// source concernée et à redemander les tuiles visibles — dont celles qui
+// viennent d'échouer. Une seule relance groupée par fenêtre de 4 s (pas une
+// par tuile en erreur) pour ne pas aggraver une vraie limite de débit.
+let dernierRetryTuile = {};
+map3d.on('error', e => {
+  const id = e.sourceId;
+  if (id !== 'ortho' && id !== 'dem') return;
+  const maintenant = Date.now();
+  if (maintenant - (dernierRetryTuile[id] || 0) < 4000) return;
+  dernierRetryTuile[id] = maintenant;
+  setTimeout(() => {
+    const src = map3d.getSource(id);
+    if (src && src.tiles) src.setTiles(src.tiles);
+  }, 1500);
+});
 chart.on('error', e => {});
 
 function checkReady(){
@@ -877,6 +946,31 @@ const mkGuess = makeMarker('mk-guess', true);
 const mkTruth = makeMarker('mk-truth');
 const mkDR    = makeMarker('mk-dr');
 const mkZone  = makeMarker('mk-zone');
+
+/** Repère du point désigné dans la vue 3D, reporté sur la carte. */
+const mkVise = (() => {
+  const el = document.createElement('div');
+  el.className = 'mk mk-vise';
+  const cible = document.createElement('div');
+  cible.className = 'cible';
+  el.appendChild(cible);
+  return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
+})();
+
+/** Poignée de rayon en mode zone : un rond qu'on tire pour agrandir ou
+ *  réduire le cercle directement sur la carte, sans passer par le curseur.
+ *  Contrairement aux autres repères, elle porte un enfant .poignee — c'est
+ *  lui qui capte le clic (pointer-events), l'élément racine reste
+ *  transparent aux événements pour ne pas gêner le reste du mode zone. */
+const mkZoneR = (() => {
+  const el = document.createElement('div');
+  el.className = 'mk mk-zone-r';
+  const poignee = document.createElement('div');
+  poignee.className = 'poignee';
+  el.appendChild(poignee);
+  return new maplibregl.Marker({ element:el, draggable:true, rotationAlignment:'viewport' });
+})();
+let zoneHandleBrg = 90;   // direction de la poignée par rapport au centre ; 90° = est, au départ
 
 /** Flèche de cap, montrée au débriefing sur la position vraie.
  *  `rotationAlignment:'map'` fait appliquer rotateZ(rotation − cap carte) :
@@ -918,6 +1012,84 @@ function showMarker(mk, on, pos){
  * fait exactement l'inverse dont on a besoin : (position caméra + altitude,
  * point visé + altitude) -> {center, zoom, pitch, bearing, elevation}.
  */
+/* --------------------------------------------------------------------------
+   Préchargement de la vue 3D
+   --------------------------------------------------------------------------
+   MapLibre ne demande que les tuiles du champ courant : en tournant le regard,
+   tout le reste est à charger, d'où l'apparition progressive du décor. On tire
+   donc à l'avance, tout autour de l'avion, les tuiles qu'il réclamera.
+
+   On ne touche pas à la caméra : on se contente d'appeler fetch() sur les URL
+   de tuiles, ce qui remplit le cache HTTP du navigateur. Quand MapLibre
+   demandera ensuite ces mêmes URL, elles seront servies depuis le cache.
+   Vérifié : l'ortho IGN renvoie « cache-control: max-age=1814400 » (21 jours),
+   le MNT porte un ETag.
+
+   Les paliers imitent ce que MapLibre demande vraiment : zoom élevé tout près,
+   de plus en plus grossier au loin. Concurrence délibérément basse — le
+   service IGN limite le débit, et le saturer produirait exactement les tuiles
+   ratées qu'on cherche à éviter. */
+// Budget contraint par le débit réel des serveurs, mesuré : ~2,0 s par tuile
+// d'ortho IGN, 0,7 s par tuile de MNT. Précharger tout le tour de l'horizon à
+// tous les zooms demanderait plus de quatre minutes — sans intérêt. On vise donc
+// ~1 min de tâche de fond, en commençant par ce qui occupe le plus l'écran :
+// le relief (sans lui la géométrie manque, c'est le plus visible), puis la
+// bande moyenne de l'imagerie, puis le proche, puis le lointain.
+// Le cache du navigateur étant valable 21 jours, ce qui est tiré une fois reste
+// acquis : une zone d'entraînement devient de plus en plus fluide au fil des
+// manches.
+const PALIERS_ORTHO = [ [15, 2000], [16, 1000], [14, 5000] ];
+const PALIERS_MNT   = [ [14, 2500], [13, 6000], [12, 15000] ];
+const PRECHARGE_PARALLELE = 4;      // au-delà, on risque de déclencher le bridage IGN
+const PRECHARGE_DELAI_MS  = 1500;   // laisse d'abord se charger le champ courant
+let prechargeEnCours = null;
+
+function tuilesAutour(lat, lon, z, rayonM){
+  // Rayon en degrés, converti en plage de tuiles : la latitude borne la
+  // longitude, d'où le cos.
+  const dLat = rayonM / 111320;
+  const dLon = rayonM / (111320 * Math.cos(rad(lat)));
+  const a = tilePixel(lon - dLon, lat + dLat, z);   // coin nord-ouest
+  const b = tilePixel(lon + dLon, lat - dLat, z);   // coin sud-est
+  const out = [];
+  for (let x = a.x; x <= b.x; x++)
+    for (let y = a.y; y <= b.y; y++) out.push({ z, x, y });
+  return out;
+}
+
+async function prechargerVue3D(lat, lon){
+  if (!S.set.precharge) return;
+  if (prechargeEnCours) prechargeEnCours.abort();
+  const ctrl = new AbortController();
+  prechargeEnCours = ctrl;
+
+  const urls = [];
+  // Le relief d'abord : sans lui la géométrie manque, c'est le plus visible.
+  for (const [z, r] of PALIERS_MNT)
+    for (const t of tuilesAutour(lat, lon, z, r))
+      urls.push(CFG.dem.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y));
+  for (const [z, r] of PALIERS_ORTHO)
+    for (const t of tuilesAutour(lat, lon, z, r))
+      urls.push(CFG.ortho.replace('{z}', t.z).replace('{x}', t.x).replace('{y}', t.y));
+
+  await new Promise(r => setTimeout(r, PRECHARGE_DELAI_MS));
+  if (ctrl.signal.aborted) return;
+
+  let i = 0;
+  const tireur = async () => {
+    while (i < urls.length && !ctrl.signal.aborted){
+      const u = urls[i++];
+      try{
+        // priority:'low' laisse passer en premier les tuiles du champ courant
+        // (ignoré silencieusement par les navigateurs qui ne le gèrent pas).
+        await fetch(u, { signal:ctrl.signal, priority:'low', cache:'force-cache' });
+      }catch(e){ /* tuile absente ou préchargement annulé : sans conséquence */ }
+    }
+  };
+  await Promise.all(Array.from({ length:PRECHARGE_PARALLELE }, tireur));
+  if (prechargeEnCours === ctrl) prechargeEnCours = null;
+}
+
 function updateCamera(){
   const r = S.round;
   if (!r) return;
@@ -949,6 +1121,75 @@ function updateCamera(){
   updateLookHud();
 }
 
+/* --------------------------------------------------------------------------
+   Du pixel cliqué dans la vue 3D au point au sol
+   --------------------------------------------------------------------------
+   MapLibre ne sait pas le faire : son unproject() ignore le relief. Mesuré —
+   un aller-retour project/unproject dérive jusqu'à 64 px, et uniquement en
+   vertical (l'axe horizontal, lui, est juste). C'est logique : sans lancer de
+   rayon, la distance le long du sol est une pure supposition.
+   On le fait donc nous-mêmes, ce qui est possible parce qu'on connaît notre
+   caméra exactement — c'est nous qui la plaçons dans updateCamera().
+   -------------------------------------------------------------------------- */
+function solSousLeClic(x, y){
+  const r = S.round;
+  if (!r) return null;
+  const cv = map3d.getCanvas();
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return null;
+
+  const agl    = S.set.altFt * FT;
+  const camAlt = r.groundElev + agl;
+  const c      = contraintesVue();
+  const site   = c.siteFixe != null ? c.siteFixe : clamp(S.view.site, 4, 75);
+  const az     = norm360(r.heading + S.view.rel);
+
+  // Direction du rayon dans le repère caméra, puis passage en repère local
+  // est/nord/haut. Le champ de vision est vertical : les deux axes écran se
+  // ramènent donc à la demi-hauteur.
+  const t = Math.tan(rad(S.set.fov / 2));
+  const nx = (x - W / 2) / (H / 2) * t;      // droite
+  const ny = -(y - H / 2) / (H / 2) * t;     // haut (l'écran compte vers le bas)
+  const sa = Math.sin(rad(az)), ca = Math.cos(rad(az));
+  const ss = Math.sin(rad(site)), cs = Math.cos(rad(site));
+  const F = [ sa * cs,  ca * cs, -ss ];      // avant, plongeant de « site »
+  const R = [ ca,      -sa,       0  ];      // droite
+  const U = [ sa * ss,  ca * ss,  cs ];      // haut caméra (R ^ F)
+  let dE = nx * R[0] + ny * U[0] + F[0];
+  let dN = nx * R[1] + ny * U[1] + F[1];
+  let dU = nx * R[2] + ny * U[2] + F[2];
+  const norme = Math.hypot(dE, dN, dU);
+  dE /= norme; dN /= norme; dU /= norme;
+
+  if (dU >= -1e-4) return null;              // vise l'horizon ou le ciel
+
+  const hor = Math.hypot(dE, dN);
+  const brg = norm360(deg(Math.atan2(dE, dN)));
+  const solA = s => {                        // altitude du terrain à la distance s
+    const p = destPoint(r.truth.lat, r.truth.lon, brg, s * hor);
+    const e = map3d.queryTerrainElevation([p.lon, p.lat]);
+    return { p, sol: (e == null || !isFinite(e)) ? r.groundElev : e };
+  };
+
+  // Marche vers l'avant jusqu'à passer sous le terrain, puis dichotomie.
+  const PAS = 60, MAX = 40000;
+  let sPrec = 0, trouve = 0;
+  for (let sd = PAS; sd <= MAX; sd += Math.min(400, PAS + sd * 0.05)){
+    const { sol } = solA(sd);
+    if (camAlt + sd * dU <= sol){ trouve = sd; break; }
+    sPrec = sd;
+  }
+  if (!trouve) return null;                  // rien touché : hors de portée
+  let lo = sPrec, hi = trouve;
+  for (let i = 0; i < 24; i++){
+    const mid = (lo + hi) / 2;
+    const { sol } = solA(mid);
+    if (camAlt + mid * dU <= sol) hi = mid; else lo = mid;
+  }
+  const fin = solA(hi);
+  return { lat: fin.p.lat, lon: fin.p.lon, dist: hi * hor };
+}
+
 function updateLookHud(){
   const r = S.round; if (!r) return;
   const rel = S.view.rel;
@@ -959,7 +1200,7 @@ function updateLookHud(){
   $('lkSite').textContent  = Math.round(S.view.site) + '°';
   $('lkFov').textContent   = Math.round(S.set.fov) + '°';
   const branche = S.set.mode === 'branche' && r.leg;
-  $('lkChronoWrap').hidden = !branche;
+  $('chronoMap').hidden = !branche;
   if (branche) $('lkChrono').textContent = mmss(r.chrono);
   $('roseRing').setAttribute('transform', 'rotate(' + (-r.heading) + ')');
   $('viewCone').setAttribute('transform', 'rotate(' + rel + ')');
@@ -972,7 +1213,8 @@ function updateLookHud(){
 
   el.addEventListener('pointerdown', ev => {
     if (S.mode === 'intro') return;
-    S.drag = { x:ev.clientX, y:ev.clientY, id:ev.pointerId };
+    S.drag = { x:ev.clientX, y:ev.clientY, id:ev.pointerId,
+                x0:ev.clientX, y0:ev.clientY, parcouru:0 };
     try{ el.setPointerCapture(ev.pointerId); }catch(e){}   // capture facultative
     el.style.cursor = 'grabbing';
   });
@@ -980,6 +1222,7 @@ function updateLookHud(){
     if (!S.drag || S.drag.id !== ev.pointerId) return;
     const dx = ev.clientX - S.drag.x, dy = ev.clientY - S.drag.y;
     S.drag.x = ev.clientX; S.drag.y = ev.clientY;
+    S.drag.parcouru += Math.abs(dx) + Math.abs(dy);   // pour distinguer clic et glisser
     // Sens « on attrape le paysage » : le décor suit le curseur, donc la caméra
     // part à l'opposé du geste — comme dans Google Earth.
     const c = contraintesVue();
@@ -991,8 +1234,11 @@ function updateLookHud(){
   });
   const end = ev => {
     if (!S.drag) return;
+    const clic = S.drag.parcouru < 5;   // seuil : en dessous, c'était un clic
+    const bx = S.drag.x0, by = S.drag.y0;
     try{ el.releasePointerCapture(S.drag.id); }catch(e){}
     S.drag = null; el.style.cursor = 'grab';
+    if (clic && S.mode === 'debrief') pointerDansLaVue3D(bx, by);
   };
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
@@ -1190,9 +1436,11 @@ async function newRound(){
   showMarker(mkTruth, false);
   showMarker(mkZone, false);
   showMarker(mkHdg, false);
+  showMarker(mkVise, false);
 
   chart.setBearing(chartBearing());
   cadrerManche(false);
+  prechargerVue3D(found.pos.lat, found.pos.lon);
   majEchelleEtiquettes();   // le zoom vient de changer (cadrage) : pas d'attendre l'evenement 'zoom'
 
   updateChips();
@@ -1560,6 +1808,19 @@ map3d.on('idle', () => {
   }
 });
 
+/** Clic dans la vue 3D au débriefing : on reporte le point visé sur la carte.
+ *  C'est là qu'on apprend le plus — « ce relief que je vois, c'est quoi sur la
+ *  carte ? » — d'où la restriction au débriefing : pendant la manche, ça
+ *  donnerait la réponse. */
+function pointerDansLaVue3D(clientX, clientY){
+  const r = map3d.getCanvas().getBoundingClientRect();
+  const p = solSousLeClic(clientX - r.left, clientY - r.top);
+  if (!p){ toast('Visez le sol, pas le ciel'); return; }
+  showMarker(mkVise, true, p);
+  const d = distance(S.round.truth, p);
+  toast('Point visé reporté sur la carte — ' + (d / NM).toFixed(2) + ' NM devant vous');
+}
+
 /* ---- réponse ---- */
 chart.on('click', ev => {
   const p = { lat:ev.lngLat.lat, lon:ev.lngLat.lng };
@@ -1691,6 +1952,7 @@ function renderStats(){
 function drawZone(fit){
   chart.getSource('zone').setData(polyFeature(circleRing(S.set.zone, S.set.zoneR * NM)));
   showMarker(mkZone, true, S.set.zone);
+  showMarker(mkZoneR, true, destPoint(S.set.zone.lat, S.set.zone.lon, zoneHandleBrg, S.set.zoneR * NM));
   if (!fit) return;
   const b = new maplibregl.LngLatBounds();
   circleRing(S.set.zone, S.set.zoneR * NM, 32).forEach(c => b.extend(c));
@@ -1711,9 +1973,26 @@ function enterZoneMode(){
 
 function exitZoneMode(){
   showMarker(mkZone, false);
+  showMarker(mkZoneR, false);
   chart.getSource('zone').setData(EMPTY);
   newRound();
 }
+
+/* Glisser la poignée redimensionne en direct : le rayon suit la distance au
+ * centre, dans n'importe quelle direction — la poignée reste ensuite sur le
+ * cercle, dans la direction où on l'a lâchée. Pas de recadrage pendant le
+ * geste (drawZone(false)), sinon la carte bouge sous le doigt ; un seul
+ * recadrage à la fin, comme pour le curseur du tiroir. */
+mkZoneR.on('drag', () => {
+  const p = mkZoneR.getLngLat();
+  const d = distance(S.set.zone, { lat:p.lat, lon:p.lng });
+  S.set.zoneR = clamp(Math.round(d / NM), 5, 100);
+  zoneHandleBrg = bearingTo(S.set.zone, { lat:p.lat, lon:p.lng });
+  $('zoneRange').value = S.set.zoneR;
+  $('zoneRangeVal').textContent = S.set.zoneR + ' NM';
+  chart.getSource('zone').setData(polyFeature(circleRing(S.set.zone, S.set.zoneR * NM)));
+});
+mkZoneR.on('dragend', () => { saveSettings(); drawZone(true); });
 
 /* ---- tiroir ---- */
 // visibility est gérée en JS plutôt qu'en CSS pure : une transition CSS sur une
@@ -1754,6 +2033,13 @@ function syncForm(){
   $('inSweep').value       = S.set.sweepMax;
   $('inShowCircle').checked= S.set.showCircle;
   // La réglette est dessinée pour mesurer ETALON_MM avec l'étalonnage courant.
+  // Filet de sécurité : un echelleCal à 0/NaN/Infinity (jamais censé arriver,
+  // mais une seule division non protégée suffit) donnerait une largeur CSS
+  // invalide ("NaNpx"/"Infinitypx"), silencieusement ignorée par le
+  // navigateur — le bloc reprendrait alors sa largeur par défaut (pleine
+  // largeur du tiroir), donnant l'impression trompeuse d'un étalonnage
+  // revenu à zéro alors que c'est un calcul qui a débordé, pas un reset réel.
+  if (!(S.set.echelleCal > 0) || !isFinite(S.set.echelleCal)) S.set.echelleCal = 1;
   $('regletteBar').style.width = (ETALON_MM * 96 / 25.4 / S.set.echelleCal).toFixed(1) + 'px';
   $('inEtalon').value = ETALON_MM;
   const det = densiteEcran();
@@ -1771,6 +2057,7 @@ function syncForm(){
   $('inAlt').value     = S.set.altFt;
   $('inHauteurRef').value = S.set.hauteurRef;
   $('inSommetRayon').value = S.set.sommetRayon;
+  $('inPrecharge').checked = S.set.precharge;
   $('rowSommetRayon').hidden = S.set.hauteurRef !== 'sommet';
   $('inFov').value     = S.set.fov;
   $('fovVal').textContent = Math.round(S.set.fov) + '°';
@@ -1796,6 +2083,7 @@ function onSettingChange(){
   const rayonAvant   = S.set.sommetRayon;
   S.set.hauteurRef   = $('inHauteurRef').value;
   S.set.sommetRayon  = clamp(+$('inSommetRayon').value || 500, 50, 2000);
+  S.set.precharge    = $('inPrecharge').checked;
   S.set.fov        = clamp(+$('inFov').value || 55, 25, 80);
   const h = $('inHdg').value.trim();
   S.set.fixedHdg   = h === '' ? null : clamp(+h || 0, 0, 359);
@@ -1837,7 +2125,7 @@ function onSettingChange(){
 }
 
 ['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inHauteurRef','inSommetRayon','inFov','inHdg','inCenter',
- 'inSource','inUrl','inUrlZ','inMode','inLegMin','inSweep','inShowCircle']
+ 'inSource','inUrl','inUrlZ','inMode','inLegMin','inSweep','inShowCircle','inPrecharge']
   .forEach(id => {
     const el = $(id);
     el.addEventListener('change', onSettingChange);
@@ -1890,12 +2178,17 @@ $('btnReveal').onclick     = reveal;
 $('btnResetStats').onclick = () => { S.hist = []; saveHist(); renderStats(); updateChips(); toast('Statistiques remises à zéro'); };
 
 $('btnValiderEtalon').onclick = () => {
-  const mm = +$('inEtalon').value;
+  // Un clavier iPad en français saisit une virgule décimale ("36,5"), que
+  // <input type="number"> ne reconnaît pas : .value renvoie alors '' (donc 0
+  // une fois converti), pas une erreur — silencieusement faux plutôt que
+  // bloqué. On accepte donc la virgule avant de convertir.
+  const mm = +$('inEtalon').value.replace(',', '.');
   if (!isFinite(mm) || mm < 5 || mm > 200){ toast('Longueur mesurée invalide'); return; }
   // Correction relative : la réglette était censée mesurer ETALON_MM, elle en
   // mesure mm — le facteur se corrige donc du même rapport, et une seule passe
-  // suffit quel que soit le point de départ.
-  S.set.echelleCal *= mm / ETALON_MM;
+  // suffit quel que soit le point de départ. Bornes de sécurité : jamais un
+  // facteur dégénéré (0, négatif, extrême) ne doit pouvoir se stocker.
+  S.set.echelleCal = clamp(S.set.echelleCal * (mm / ETALON_MM), 0.3, 3);
   S.set.echelleCalManuel = true;
   saveSettings(); syncForm();
   if (S.round) cadrerManche(true);   // la carte reflète l'étalonnage tout de suite
