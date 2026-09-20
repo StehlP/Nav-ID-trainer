@@ -53,6 +53,10 @@
   #brand span{color:var(--txt3);font-weight:400}
   #chips{display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
   #chips::-webkit-scrollbar{display:none}
+  /* L'attribut hidden ne pose qu'un display:none de feuille par défaut, que
+     n'importe quel display déclaré ici écrase silencieusement — .chip est en
+     flex, si bien que masquer un bandeau par hidden restait sans effet. */
+  [hidden]{display:none !important}
   .chip{
     display:flex;align-items:center;gap:7px;white-space:nowrap;background:var(--panel2);
     border:1px solid var(--line);border-radius:6px;padding:5px 10px;
@@ -114,6 +118,15 @@
   #btnHome svg{display:block}
   #btnEchelle{font-family:var(--mono);letter-spacing:.02em}
   #answerBar{bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:8px;align-items:center}
+  /* En recalage on empile : « Démarrer » puis, une fois parti, la consigne —
+     et « Révéler » dessous dans les deux cas. Les éléments gardent leur
+     largeur propre (center, et non stretch) pour que « Révéler » reste centré
+     sur l'axe du volet et de même taille avant et pendant le vol. */
+  #answerBar.colonne{flex-direction:column;align-items:center;gap:7px}
+  #btnDemarrerVol{font-size:16px;font-weight:700;padding:11px 32px;letter-spacing:.3px}
+
+  #vitesseBtn{top:10px;right:10px}
+  #btnVitesse b{font-family:var(--mono);color:var(--cyan);font-weight:600}
 
   /* ---------- bandeau mode zone ---------- */
   #zoneBar{
@@ -244,6 +257,19 @@
     content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;
     border-radius:50%;background:var(--amber);
   }
+  /* Le point désigné en réponse. Il reste affiché tout le débriefing, et ne
+     doit pas se confondre avec le repère ambre libre, qu'on peut déplacer
+     ensuite à volonté pour comparer carte et paysage. */
+  .mk-reponse{width:22px;height:22px;pointer-events:none}
+  .mk-reponse::before,.mk-reponse::after{content:none}
+  .mk-reponse .rond{
+    position:absolute;inset:0;border-radius:50%;
+    border:3px solid var(--red);box-shadow:0 0 0 1px rgba(11,15,23,.85), 0 0 4px rgba(0,0,0,.8);
+  }
+  .mk-reponse .rond::after{
+    content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;
+    border-radius:50%;background:var(--red);
+  }
   /* Le même repère, mais posé dans la vue 3D : ce n'est pas un marqueur
      MapLibre (ses marqueurs ignorent le relief, cf. ecranDepuisSol) mais un
      simple élément qu'on positionne nous-mêmes à chaque image. */
@@ -257,6 +283,21 @@
      sinon on croirait que le report a échoué. */
   #vise3d.masque{opacity:.4}
   #vise3d.masque .anneau{border-style:dashed}
+  /* Le point de recalage lui-même, montré dans le paysage au débriefing : on
+     voit alors ce qu'il fallait regarder, et de combien on s'en est écarté. */
+  #cible3d{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;
+    pointer-events:none;z-index:3}
+  #cible3d .los{position:absolute;inset:3px;transform:rotate(45deg);
+    border:3px solid var(--cyan);border-radius:3px;
+    box-shadow:0 0 0 1px rgba(11,15,23,.85), 0 0 6px rgba(0,0,0,.8)}
+  #reponse3d{position:absolute;left:0;top:0;width:24px;height:24px;margin:-12px 0 0 -12px;
+    pointer-events:none;z-index:3}
+  #reponse3d .rond{position:absolute;inset:0;border-radius:50%;
+    border:3px solid var(--red);
+    box-shadow:0 0 0 1px rgba(11,15,23,.85), 0 0 6px rgba(0,0,0,.8)}
+  #reponse3d.masque{opacity:.4}
+  #cible3d.masque{opacity:.4}
+  #cible3d .los{transition:none}
   /* Poignée de rayon : un rond plein, pas la croix des autres repères — bien
      distinct visuellement, pour signaler qu'on peut le tirer pour agrandir
      ou réduire le cercle de zone. */
@@ -273,10 +314,13 @@
     font-family:var(--mono);font-size:12px;font-weight:700;line-height:1;
     color:#10161c;white-space:nowrap;pointer-events:none;
   }
-  /* Points de départ et d'arrivée de la branche : ronds pleins, sans étiquette. */
+  /* Départ et arrivée de la branche : cercles vides, comme sur une carte
+     préparée à la main. Diamètre et épaisseur sont donnés au sol, donc
+     recalculés à chaque zoom — un trait figé en pixels aurait rempli le
+     cercle en s'éloignant. */
   .mk-leg-pt{
     width:11px;height:11px;border-radius:50%;
-    background:#10161c;pointer-events:none;
+    border:2px solid #10161c;background:transparent;pointer-events:none;
   }
   .maplibregl-ctrl-attrib{font-size:10px}
 
@@ -296,7 +340,7 @@
     <div class="chip"><i>Manche</i><b id="cRound">—</b></div>
     <div class="chip"><i>Cap</i><b id="cHdg">—</b></div>
     <div class="chip"><i>Hauteur</i><b id="cAlt">—</b></div>
-    <div class="chip"><i>Incertitude</i><b id="cRad">—</b></div>
+    <div class="chip" id="chipRad"><i>Incertitude</i><b id="cRad">—</b></div>
     <div class="chip"><i>Score moyen</i><b id="cScore">—</b></div>
   </div>
   <button class="btn primary" id="btnNew">Nouvelle manche</button>
@@ -307,6 +351,8 @@
   <section id="pane3d">
     <div id="map3d"></div>
     <div id="vise3d" hidden><span class="anneau"></span></div>
+    <div id="cible3d" hidden><span class="los"></span></div>
+    <div id="reponse3d" hidden><span class="rond"></span></div>
 
     <div class="ov card" id="lookInfo">
       <div class="big">Regard <span id="lkClock">12 h</span> · <span id="lkAz">—</span></div>
@@ -327,6 +373,10 @@
       <path d="M0,-6 L5,5 L0,2 L-5,5 Z" fill="#dfe6f0"/>
       <circle cx="0" cy="0" r="2" fill="#dfe6f0"/>
     </svg>
+
+    <div class="ov i" id="vitesseBtn" hidden>
+      <button class="btn" id="btnVitesse" title="Accélérer le vol — ×1, ×2, ×4">Accélérer <b id="vitesseTxt">×1</b></button>
+    </div>
 
     <div class="ov i" id="altBtns">
       <button class="btn" id="btnAlt">
@@ -363,6 +413,8 @@
 
     <div class="ov i" id="answerBar">
       <button class="btn primary" id="btnValidate" disabled>Valider</button>
+      <button class="btn primary" id="btnDemarrerVol" hidden>Démarrer</button>
+      <span id="consigneRecal" hidden>Cliquez le point dans la vue 3D</span>
       <button class="btn" id="btnReveal">Révéler</button>
     </div>
 
@@ -379,7 +431,6 @@
       </div>
       <div id="dbActions">
         <button class="btn primary" id="btnNext">Manche suivante</button>
-        <button class="btn" id="btnZoomTruth">Zoomer sur la position vraie</button>
       </div>
     </div>
   </section>
@@ -398,7 +449,24 @@
         <select id="inMode">
           <option value="cercle">Cercle d'incertitude donné</option>
           <option value="branche">Branche de nav au chrono</option>
+          <option value="recalage" id="optRecalage" disabled>Point de recalage à vue</option>
         </select>
+      </div>
+      <div id="grpRecalage" hidden>
+        <div class="row"><span>Avance sur le point</span>
+          <input type="number" id="inRecalMin" min="1" max="6" step="0.5"> <span class="unit">min</span></div>
+        <div class="row"><span>Décalage latéral maximal</span>
+          <input type="number" id="inRecalEcart" min="0" max="2" step="0.1"> <span class="unit">NM</span></div>
+        <div class="row"><span>Durée de la branche</span>
+          <input type="number" id="inRecalLeg" min="4" max="60" step="1"> <span class="unit">min</span></div>
+        <p class="muted" id="recalInfo"></p>
+        <div class="row" id="rowZoneRecal" hidden><span>Zone de travail</span>
+          <button class="btn" id="btnZoneRecal">Amener la zone sur la base</button></div>
+        <p class="muted">Le point de recalage est tracé sur la carte : il a été choisi
+          pendant la préparation, comme en vrai. Il s'agit de le reconnaître dans le
+          paysage et de <b>cliquer dessus dans la vue 3D</b> avant de lui arriver dessus.
+          L'avion avance en temps réel et vole légèrement à côté du trait, si bien qu'un
+          relèvement calculé sur la carte ne suffit pas.</p>
       </div>
       <div id="grpBranche" hidden>
         <div class="row"><span>Durée de la branche</span>
@@ -700,6 +768,7 @@ const DEFAULTS = {
   source:'url', urlMaxZoom:11,
   urlTuiles:'https://StehlP.github.io/Nav-ID-trainer/tuiles/{z}/{x}/{y}.png',
   mode:'cercle', legMin:18, showCircle:false, sweepMax:110, echelleCal:1, echelleCalManuel:false,
+  recalMin:2, recalEcart:0.6, recalLegMin:12, recalVitesse:1,
   precharge:true,
   fixedHdg:null
 };
@@ -968,6 +1037,16 @@ const mkVise = (() => {
   const cible = document.createElement('div');
   cible.className = 'cible';
   el.appendChild(cible);
+  return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
+})();
+
+/** Le point désigné en réponse, laissé en place tout le débriefing. */
+const mkReponse = (() => {
+  const el = document.createElement('div');
+  el.className = 'mk mk-reponse';
+  const rond = document.createElement('div');
+  rond.className = 'rond';
+  el.appendChild(rond);
   return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
 })();
 
@@ -1268,13 +1347,17 @@ function estMasque(lat, lon){
 /** Le point désigné, commun aux deux vues : null quand il n'y en a pas. */
 let pointVise = null;
 
-/** Repositionne le repère 3D. Appelé à chaque mouvement de caméra, donc il
- *  doit rester bon marché — d'où l'occlusion calculée une fois, à la pose. */
-function majVise3D(){
-  const el = $('vise3d');
+/** Le point de recalage à montrer dans la vue 3D au débriefing. */
+let pointCible = null;
+/** Le point désigné en réponse, montré lui aussi dans la vue 3D. */
+let pointReponse = null;
+
+/** Place un repère de la vue 3D sur un point du sol, ou le cache. */
+function poserRepere3D(id, pt){
+  const el = $(id);
   if (!el) return;
-  if (!pointVise || S.mode !== 'debrief'){ el.hidden = true; return; }
-  const p   = ecranDepuisSol(pointVise.lat, pointVise.lon);
+  if (!pt || S.mode !== 'debrief'){ el.hidden = true; return; }
+  const p   = ecranDepuisSol(pt.lat, pt.lon);
   const cam = repereCamera();
   // On tolère un léger débord : un repère à moitié sorti reste une indication.
   if (!p || !cam || p.x < -30 || p.y < -30 || p.x > cam.W + 30 || p.y > cam.H + 30){
@@ -1283,7 +1366,15 @@ function majVise3D(){
   el.hidden = false;
   el.style.left = p.x.toFixed(1) + 'px';
   el.style.top  = p.y.toFixed(1) + 'px';
-  el.classList.toggle('masque', !!pointVise.masque);
+  el.classList.toggle('masque', !!pt.masque);
+}
+
+/** Repositionne les repères 3D. Appelé à chaque mouvement de caméra, donc il
+ *  doit rester bon marché — d'où l'occlusion calculée une fois, à la pose. */
+function majVise3D(){
+  poserRepere3D('vise3d', pointVise);
+  poserRepere3D('cible3d', pointCible);
+  poserRepere3D('reponse3d', pointReponse);
 }
 
 /** Pose le point désigné dans les deux vues à la fois. */
@@ -1303,8 +1394,11 @@ function updateLookHud(){
   $('lkSite').textContent  = Math.round(S.view.site) + '°';
   $('lkFov').textContent   = Math.round(S.set.fov) + '°';
   const branche = S.set.mode === 'branche' && r.leg;
-  $('chronoMap').hidden = !branche;
+  const recal   = !!r.recal;
+  $('chronoMap').hidden = !(branche || recal);
   if (branche) $('lkChrono').textContent = mmss(r.chrono);
+  if (recal)   $('lkChrono').textContent = mmss(r.recal.tDepart + r.recal.tMin)
+                                          + ' / ' + mmss(r.recal.tPoint);
   $('roseRing').setAttribute('transform', 'rotate(' + (-r.heading) + ')');
   $('viewCone').setAttribute('transform', 'rotate(' + rel + ')');
 }
@@ -1342,6 +1436,7 @@ function updateLookHud(){
     try{ el.releasePointerCapture(S.drag.id); }catch(e){}
     S.drag = null; el.style.cursor = 'grab';
     if (clic && S.mode === 'debrief') pointerDansLaVue3D(bx, by);
+    else if (clic && S.mode === 'play' && S.set.mode === 'recalage') repondreRecalage(bx, by);
   };
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
@@ -1498,14 +1593,228 @@ async function genererBranche(){
   return null;
 }
 
+/* ==========================================================================
+   MODE « POINT DE RECALAGE »
+   --------------------------------------------------------------------------
+   On démarre quelques minutes avant un point choisi à la préparation, et on
+   avance en temps réel. Le point est tracé sur la carte ; il s'agit de le
+   reconnaître dehors et de cliquer dessus dans la vue 3D avant d'arriver
+   dessus.
+
+   La base de points est précalculée hors ligne (voir outils-recalage/) et
+   livrée en fichier texte : aucune détection ne tourne chez l'utilisateur.
+   ========================================================================== */
+/* === POINTS DE RECALAGE (généré par outils-recalage/publier-base.js) === */
+/* 53 points validés à l'œil. Un par ligne : latitude longitude type.
+   Extraits de la carte OACI 1/500 000 hors ligne (voir outils-recalage/). */
+const POINTS_RECALAGE = `
+43.61918 0.64613 route×hydro
+43.62166 0.64888 village
+43.63409 0.89333 route×noir
+43.63757 0.87479 route×noir
+43.65198 0.64545 village
+43.65496 0.91118 village
+43.65645 0.72166 village
+43.66042 0.87410 village
+43.66241 1.02448 village
+43.66539 0.60150 route×noir
+43.69121 1.08765 village
+43.69320 0.73059 village
+43.69419 0.81985 village
+43.71206 1.16043 village
+43.72199 0.95856 route×hydro
+43.72794 0.93590 village
+43.74282 1.18034 village
+43.74481 0.67085 village
+43.74630 0.74707 village
+43.77407 0.92903 village
+43.79390 1.07872 village
+43.80629 1.03065 village
+43.81025 0.60219 route×hydro
+43.81422 0.55000 village
+43.83453 0.74364 route×hydro
+43.83502 1.02242 village
+43.83651 0.84801 village
+43.83997 0.72922 village
+43.84988 0.57060 route×hydro
+43.85978 1.21124 route×hydro
+43.86374 1.05881 route×hydro
+43.87562 0.61249 village
+43.87909 0.58777 route×hydro
+43.89542 1.13708 route×hydro
+43.90680 0.55138 village
+43.92114 1.02173 village
+43.93301 0.87616 village
+43.95476 0.94551 route×hydro
+43.98886 0.94894 village
+44.00467 0.66948 village
+44.00467 1.17691 village
+44.00714 0.88303 route×noir
+44.00763 0.88165 route×hydro
+44.01010 0.73265 route×hydro
+44.01751 0.83359 route×noir
+44.01800 1.07391 village
+44.02294 1.07941 route×hydro
+44.03183 0.55893 village
+44.03281 0.94482 village
+44.03973 0.71823 village
+44.03973 0.88852 village
+44.05996 0.78346 village
+44.06933 0.89951 village
+`;
+/* === FIN POINTS DE RECALAGE === */
+
+/* La base est embarquée, pas chargée par fetch : l'appli est un fichier
+   unique, et un fetch() relatif échoue dès qu'on ouvre index.html depuis le
+   disque — le navigateur refuse la requête, la base reste vide et le mode
+   paraît indisponible sans le moindre message. C'est exactement ce qui
+   arrivait. */
+let pointsRecalage = [];
+
+function chargerPointsRecalage(){
+  pointsRecalage = POINTS_RECALAGE.split('\n')
+    .map(l => l.trim())
+    .filter(l => l && l[0] !== '#')
+    .map(l => { const c = l.split(/\s+/);
+                return { lat:+c[0], lon:+c[1], type:c.slice(2).join(' ') || 'point' }; })
+    .filter(p => isFinite(p.lat) && isFinite(p.lon));
+  const opt = $('optRecalage');
+  if (opt) opt.disabled = pointsRecalage.length === 0;
+  if (!pointsRecalage.length && S.set.mode === 'recalage') S.set.mode = 'cercle';
+  syncForm();
+}
+
+/** Centre et rayon couvrant toute la base — la base ne porte, pour l'instant,
+ *  que la région où l'extraction a été faite. */
+function emprisePointsRecalage(){
+  if (!pointsRecalage.length) return null;
+  const c = { lat: pointsRecalage.reduce((a,p) => a + p.lat, 0) / pointsRecalage.length,
+              lon: pointsRecalage.reduce((a,p) => a + p.lon, 0) / pointsRecalage.length };
+  const r = Math.max(...pointsRecalage.map(p => distance(c, p))) / NM;
+  return { centre:c, rayonNM: Math.ceil(r + 2) };
+}
+
+/** Points de la base utilisables dans la zone de travail courante. */
+function pointsRecalageDansZone(){
+  return pointsRecalage.filter(p =>
+    distance(S.set.zone, p) <= S.set.zoneR * NM && inBbox(p));
+}
+
+async function genererRecalage(){
+  const dispo = pointsRecalageDansZone();
+  if (!dispo.length) return null;
+  const gs = S.set.gs, avance = S.set.recalMin, duree = S.set.recalLegMin;
+  const tot = Math.max(duree, avance + 2);
+
+  for (let i = 0; i < 40; i++){
+    const pt    = dispo[Math.floor(Math.random() * dispo.length)];
+    const route = Math.floor(Math.random() * 72) * 5;
+
+    /* Le point tombe à une demi-minute franche de la branche — « le point est
+       à 06:30 » — et on démarre l'avance plus tôt, à 04:30. La branche court
+       bien au-delà dans les deux sens : c'est une vraie branche de navigation,
+       pas le seul segment parcouru. */
+    const tMin0 = avance + 1, tMax = tot - 1;
+    if (tMax < tMin0) continue;
+    const tPoint = Math.round((tMin0 + Math.random() * (tMax - tMin0)) * 2) / 2;
+
+    const a = rhumbDest(pt.lat, pt.lon, route + 180, gs * tPoint / 60 * NM);
+    const b = rhumbDest(a.lat, a.lon, route, gs * tot / 60 * NM);
+    if (!inBbox(a) || !inBbox(b)) continue;
+
+    const leg = { a, b, route, gs, dureeMin: tot, coteTop: 1 };
+    const surTrait = pointSurBranche(leg, tPoint - avance);
+
+    /* Décalage latéral : on n'est jamais exactement sur le trait. Sans lui,
+       il suffirait de mesurer un relèvement sur la carte et de compter les
+       degrés depuis le nez — l'exercice ne serait plus visuel. */
+    const cote   = Math.random() < 0.5 ? 1 : -1;
+    const ecart  = (0.25 + Math.random() * 0.75) * S.set.recalEcart * NM;
+    const depart = rhumbDest(surTrait.lat, surTrait.lon, norm360(route + 90 * cote), ecart);
+    if (!inBbox(depart)) continue;
+
+    const e = await demElevation(depart.lat, depart.lon);
+    if (e == null || e < 1) continue;
+    const ref = (await altitudeReference(depart.lat, depart.lon)) ?? e;
+
+    return { truth:depart, groundElev:ref, heading:route, center:pt,
+             radiusM:uncertaintyM(), leg, chrono:0,
+             recal:{ pt, depart, avance, tPoint, tDepart: tPoint - avance,
+                     ecart:ecart * cote, tMin:0, debut:0, enVol:false } };
+  }
+  return null;
+}
+
+/* ---- vol en temps réel ---- */
+let volImage = null;
+
+const ALLURES = [1, 2, 4];
+const vitesseRecalage = () =>
+  ALLURES.includes(S.set.recalVitesse) ? S.set.recalVitesse : 1;
+
+function majVitesse(){
+  const t = $('vitesseTxt');
+  if (t) t.textContent = '×' + vitesseRecalage();
+}
+
+function arreterVol(){
+  if (volImage) cancelAnimationFrame(volImage);
+  volImage = null;
+}
+
+/** Fait avancer l'avion à la vitesse sol, en temps réel.
+ *  L'altitude sol est relue à chaque image sur le relief déjà chargé : en vol
+ *  continu, l'affinage par 'idle' ne se déclencherait quasiment jamais. */
+function demarrerVol(){
+  arreterVol();
+  const r = S.round;
+  if (!r || !r.recal) return;
+  r.recal.derniere = performance.now();
+  const pas = () => {
+    volImage = null;
+    if (S.round !== r || S.mode !== 'play' || r.answered) return;
+    /* On cumule le temps de vol au lieu de le compter depuis le départ :
+       changer d'accélération en route ne doit pas faire sauter l'avion. */
+    const maintenant = performance.now();
+    r.recal.tMin += (maintenant - r.recal.derniere) / 60000 * vitesseRecalage();
+    r.recal.derniere = maintenant;
+    const t = r.recal.tMin;
+    const p = rhumbDest(r.recal.depart.lat, r.recal.depart.lon,
+                        r.leg.route, r.leg.gs * t / 60 * NM);
+    r.truth = p;
+    const e = altitudeReferenceTerrain(p.lat, p.lon);
+    if (e != null && isFinite(e)) r.groundElev = e;
+    updateCamera();
+    if (t > r.recal.avance + 0.4){ finishRound(null, false); return; }
+    volImage = requestAnimationFrame(pas);
+  };
+  volImage = requestAnimationFrame(pas);
+}
+
+/** Réponse du joueur : un clic dans la vue 3D pendant la manche. */
+function repondreRecalage(clientX, clientY){
+  const r = S.round;
+  if (!r || !r.recal || r.answered) return;
+  if (!r.recal.enVol){ toast('Cliquez « Démarrer » quand vous êtes prêt'); return; }
+  const b = map3d.getCanvas().getBoundingClientRect();
+  const p = solSousLeClic(clientX - b.left, clientY - b.top);
+  if (!p){ toast('Visez le sol, pas le ciel'); return; }
+  finishRound(p, false);
+}
+
 async function newRound(){
   if (!S.ready.chart) return;
   $('btnNew').disabled = true;
-  const d = S.set.mode === 'branche' ? await genererBranche() : await genererCercle();
+  arreterVol();
+  const d = S.set.mode === 'recalage' ? await genererRecalage()
+          : S.set.mode === 'branche'  ? await genererBranche()
+          :                             await genererCercle();
   $('btnNew').disabled = false;
 
   if (!d){
-    toast('Aucune position valide dans cette zone (mer ou hors couverture). Déplacez le centre.', 4200);
+    toast(S.set.mode === 'recalage'
+      ? 'Aucun point de recalage dans cette zone. Déplacez le centre ou agrandissez le rayon.'
+      : 'Aucune position valide dans cette zone (mer ou hors couverture). Déplacez le centre.', 4200);
     return;
   }
 
@@ -1530,17 +1839,21 @@ async function newRound(){
   $('btnLayer').disabled = true;
 
   dessinerBranche();
-  const cercleVisible = S.set.mode !== 'branche' || S.set.showCircle;
+  // En recalage la carte ne porte que le trait et le point : pas de cercle
+  // d'incertitude, la position est connue et avance toute seule.
+  const cercleVisible = S.set.mode === 'cercle'
+                     || (S.set.mode === 'branche' && S.set.showCircle);
   chart.getSource('circle').setData(cercleVisible ? polyFeature(circleRing(center, R)) : EMPTY);
   chart.getSource('zone').setData(EMPTY);
   chart.getSource('err').setData(EMPTY);
-  showMarker(mkDR, S.set.mode === 'branche' ? false : S.set.circleMode === 'dr', center);
+  showMarker(mkDR, S.set.mode === 'cercle' && S.set.circleMode === 'dr', center);
   showMarker(mkGuess, false);
   showMarker(mkTruth, false);
   showMarker(mkZone, false);
   showMarker(mkHdg, false);
   showMarker(mkVise, false);
-  pointVise = null; majVise3D();
+  pointVise = null; pointCible = null; pointReponse = null; majVise3D();
+  showMarker(mkReponse, false);
 
   chart.setBearing(chartBearing());
   cadrerManche(false);
@@ -1599,10 +1912,11 @@ function largeurAuSol(metres){
           5, pxAuSol(metres, 5), 16, pxAuSol(metres, 16)];
 }
 
-const TRAIT_M = 400;    // épaisseur du trait de branche
+const TRAIT_M = 300;    // épaisseur du trait de branche
 const TOPS_M  = 275;    // épaisseur des tirets de minutage
 const LBL_M   = 1900;   // hauteur des chiffres de minutage
-const PT_M    = 1150;   // diamètre des ronds de départ et d'arrivée
+const PT_M    = 1500;   // diamètre des cercles de départ et d'arrivée
+const PT_TRAIT_M = 270; // épaisseur de leur trait
 
 // Le trait de branche est épais (TRAIT_M) : son rendu déborde de TRAIT_M/2 de
 // chaque côté de la géométrie. Un écart de tirets plus petit que ça les fait
@@ -1613,11 +1927,64 @@ const TOP_COURT   = 0.30 * NM;          // longueur d'un repère de minute impai
 const TOP_LONG    = TOP_COURT * 2;
 const TOP_LABEL_MARGE = 0.65 * NM;      // espace entre la pointe du tiret et le chiffre
 
+/* Marquage du point de recalage, à la manière d'une carte préparée à la main :
+   une longue traverse coupe la route au droit du point, et les deux traits
+   s'interrompent au croisement — le petit blanc laissé là désigne le point
+   mieux qu'une croix pleine, et ne masque pas le repère qu'on va chercher.
+   Le timing prévu est porté au bout de la traverse, encerclé. */
+const RECAL_BLANC = 0.32 * NM;          // blanc au croisement, sur les deux traits
+const RECAL_TRAV  = 1.50 * NM;          // demi-longueur de la traverse
+/* L'ellipse se dimensionne sur le libellé : « 4′00 » et « 12′30 » n'ont pas la
+   même largeur, et un cercle fixe serait trop lâche sur l'un, trop serré sur
+   l'autre. La police est monospace, donc la largeur se déduit du nombre de
+   signes. */
+const RECAL_ELL_MARGE = 340;            // air laissée autour du texte, en mètres
+const RECAL_ELL_BOUT = 0.45 * NM;       // écart entre le bout de la traverse et l'ellipse
+const demiAxesTiming = txt => ({
+  a: txt.length * 0.6 * LBL_M / 2 + RECAL_ELL_MARGE,
+  b: LBL_M / 2 + RECAL_ELL_MARGE,
+});
+
 /** Traits de minutage le long de la branche : un par minute entière. */
-function topsDeBranche(leg){
+const segment = (a, b) => ({ type:'Feature', properties:{},
+  geometry:{ type:'LineString', coordinates:[[a.lon,a.lat],[b.lon,b.lat]] } });
+
+/** mm'ss — la notation portée sur une carte préparée : 6'30. */
+function minuteSeconde(min){
+  const t = Math.round(min * 60);
+  return Math.floor(t / 60) + '\u2032' + String(t % 60).padStart(2, '0');
+}
+
+/** Ellipse au sol, orientée selon la route, tracée comme un trait fermé. */
+function ellipseAuSol(centre, demiA, demiB, orientation, n = 56){
+  const pts = [];
+  for (let i = 0; i <= n; i++){
+    const t = i / n * 2 * Math.PI;
+    const u = demiA * Math.cos(t), v = demiB * Math.sin(t);
+    const p = destPoint(centre.lat, centre.lon,
+                        orientation + deg(Math.atan2(v, u)), Math.hypot(u, v));
+    pts.push([p.lon, p.lat]);
+  }
+  return { type:'Feature', properties:{},
+           geometry:{ type:'LineString', coordinates:pts } };
+}
+
+/** La traverse du point : une seule longue perpendiculaire, mais tracée en
+ *  deux morceaux — elle s'interrompt elle aussi au droit de la route. */
+function traverseDeRecalage(leg, recal){
+  const pt = recal.pt;
+  return [-90, 90].map(cote =>
+    segment(destPoint(pt.lat, pt.lon, leg.route + cote, RECAL_BLANC),
+            destPoint(pt.lat, pt.lon, leg.route + cote, RECAL_TRAV)));
+}
+
+function topsDeBranche(leg, recal){
   const traits = [], labels = [];
   const cote = leg.coteTop === -1 ? -90 : 90;   // le même côté sur toute la branche
   for (let m = 1; m < leg.dureeMin - 0.01; m++){
+    // Quand le point tombe sur une minute pleine, son tiret se superposerait à
+    // la traverse : c'est la traverse qui tient lieu de repère.
+    if (recal && Math.abs(m - recal.tPoint) < 0.4) continue;
     const p = pointSurBranche(leg, m);
     const paire = (m % 2 === 0);
     const longueur = paire ? TOP_LONG : TOP_COURT;
@@ -1639,6 +2006,7 @@ let etiquettes = [];                 // marqueurs de minutage, recrees a chaque 
  *  zoomant, comme sur une carte papier qu'on approche des yeux. */
 const tailleEtiquette = zoom => pxAuSol(LBL_M, zoom);
 const taillePointBranche = zoom => pxAuSol(PT_M, zoom);
+const traitPointBranche  = zoom => Math.max(1, pxAuSol(PT_TRAIT_M, zoom));
 
 function majEchelleEtiquettes(){
   const z = chart.getZoom();
@@ -1650,6 +2018,7 @@ function majEchelleEtiquettes(){
       el.style.fontSize = pxTexte;
     }else if (el.classList.contains('mk-leg-pt')){
       el.style.width = pxRond; el.style.height = pxRond;
+      el.style.borderWidth = traitPointBranche(z) + 'px';
     }
   }
 }
@@ -1672,8 +2041,10 @@ function etiquette(texte, route){
 function pointBranche(){
   const el = document.createElement('div');
   el.className = 'mk-leg-pt';
-  const px = taillePointBranche(chart.getZoom()) + 'px';
+  const z = chart.getZoom();
+  const px = taillePointBranche(z) + 'px';
   el.style.width = px; el.style.height = px;
+  el.style.borderWidth = traitPointBranche(z) + 'px';
   return new maplibregl.Marker({ element:el, rotationAlignment:'viewport' });
 }
 
@@ -1687,14 +2058,37 @@ function dessinerBranche(){
     chart.getSource('tops').setData(EMPTY);
     return;
   }
-  chart.getSource('leg').setData({ type:'Feature', properties:{},
-    geometry:{ type:'LineString', coordinates:[[leg.a.lon,leg.a.lat],[leg.b.lon,leg.b.lat]] } });
+  const recal = S.round.recal;
+  if (recal){
+    // La route s'interrompt juste avant et juste après le point.
+    const avant = rhumbDest(recal.pt.lat, recal.pt.lon, leg.route + 180, RECAL_BLANC);
+    const apres = rhumbDest(recal.pt.lat, recal.pt.lon, leg.route, RECAL_BLANC);
+    chart.getSource('leg').setData({ type:'FeatureCollection',
+      features:[segment(leg.a, avant), segment(apres, leg.b)] });
+  }else{
+    chart.getSource('leg').setData(segment(leg.a, leg.b));
+  }
 
-  const { traits, labels } = topsDeBranche(leg);
+  const { traits, labels } = topsDeBranche(leg, recal);
+  let posTiming = null;
+  if (recal){
+    traits.push(...traverseDeRecalage(leg, recal));
+    /* Le timing se pose au bout de la traverse, du côté des chiffres de
+       minutage. Aucun risque de les heurter : la minute la plus proche est à
+       plus d'une minute de vol le long de la route, l'ellipse est en travers. */
+    const cote = leg.coteTop === -1 ? -90 : 90;
+    const axes = demiAxesTiming(minuteSeconde(recal.tPoint));
+    posTiming = destPoint(recal.pt.lat, recal.pt.lon, leg.route + cote,
+                          RECAL_TRAV + RECAL_ELL_BOUT + axes.a);
+    traits.push(ellipseAuSol(posTiming, axes.a, axes.b, leg.route + 90));
+  }
   chart.getSource('tops').setData({ type:'FeatureCollection', features:traits });
 
   for (const l of labels)
     etiquettes.push(etiquette(String(l.min), leg.route).setLngLat([l.pos.lon, l.pos.lat]).addTo(chart));
+  if (posTiming)
+    etiquettes.push(etiquette(minuteSeconde(recal.tPoint), leg.route)
+      .setLngLat([posTiming.lon, posTiming.lat]).addTo(chart));
   etiquettes.push(pointBranche().setLngLat([leg.a.lon, leg.a.lat]).addTo(chart));
   etiquettes.push(pointBranche().setLngLat([leg.b.lon, leg.b.lat]).addTo(chart));
 }
@@ -1702,8 +2096,12 @@ function dessinerBranche(){
 /** Libertes de la vue 3D selon le mode : en branche on ne balaie que le secteur
  *  avant, site fige, comme un regard porte dehors depuis le poste. */
 function contraintesVue(){
-  return S.set.mode === 'branche' ? { relMax:S.set.sweepMax, siteFixe:4 }
-                                  : { relMax:180, siteFixe:null };
+  // Les deux exercices en vol — branche et recalage — partagent les mêmes
+  // libertés : on ne balaie que le secteur avant, site figé, comme un regard
+  // porté dehors depuis le poste.
+  const enVol = S.set.mode === 'branche' || S.set.mode === 'recalage';
+  return enVol ? { relMax:S.set.sweepMax, siteFixe:4 }
+               : { relMax:180, siteFixe:null };
 }
 
 /** Interroge le serveur local : un .mbtiles depose dans le dossier est detecte
@@ -1894,7 +2292,11 @@ function cadrerManche(anime){
   const r = S.round; if (!r) return;
   const bearing = chartBearing();
   const opts = anime ? { duration:450 } : { duration:0 };
-  const centre = r.leg ? pointSurBranche(r.leg, r.leg.dureeMin / 2) : r.center;
+  // En recalage la branche est longue : on cadre sur le segment réellement
+  // parcouru, entre le départ et le point, plutôt que sur son milieu.
+  const centre = r.recal ? pointSurBranche(r.leg, r.recal.tPoint - r.recal.avance / 2)
+               : r.leg   ? pointSurBranche(r.leg, r.leg.dureeMin / 2)
+               :           r.center;
   chart.easeTo(Object.assign({ center:[centre.lon, centre.lat],
                                zoom:zoomEchelleReelle(centre.lat), bearing }, opts));
 }
@@ -1902,6 +2304,7 @@ function cadrerManche(anime){
 // Affinage de l'altitude sol dès que les tuiles MNT sont chargées dans la vue 3D.
 map3d.on('idle', () => {
   if (!S.round || S.elevFixed) return;
+  if (S.round.recal) return;        // en vol, l'altitude est relue à chaque image
   const e = altitudeReferenceTerrain(S.round.truth.lat, S.round.truth.lon);
   if (e != null && isFinite(e) && Math.abs(e - S.round.groundElev) > 2){
     S.round.groundElev = e;
@@ -1952,7 +2355,8 @@ chart.on('click', ev => {
         :                      'Point reporté dans la vue 3D');
     return;
   }
-  if (S.mode !== 'play') return;
+  // En recalage la réponse se donne dans la vue 3D, pas sur la carte.
+  if (S.mode !== 'play' || S.set.mode === 'recalage') return;
   S.round.guess = p;
   showMarker(mkGuess, true, p);
   $('btnValidate').disabled = false;
@@ -1968,27 +2372,68 @@ function reveal(){
   finishRound(S.round.guess, true);
 }
 
+/* Notation du recalage : on note l'ANGLE, pas la distance au sol.
+   Mesuré en vol d'essai : à 2,7 NM et 500 ft, le rayon rase le sol sous 1,8°
+   de site, si bien qu'un pixel d'écran vaut 128 m au sol. Un clic pile sur le
+   point sortait à 0,37 NM d'erreur — la distance est ininterprétable dans une
+   vue rasante, et c'est de la géométrie, pas un défaut de calcul.
+   L'écart de relèvement, lui, est bien conditionné : l'axe horizontal de la
+   vue est juste au pixel près. C'est aussi la bonne question : « avez-vous
+   désigné le bon objet ? », et non « à quelle distance l'avez-vous cru ? ».
+   La distance reste affichée, pour information. */
+/* On mesure l'angle, mais on NOTE l'écart latéral au sol qu'il représente :
+   portée × sin(écart). C'est la grandeur que le joueur ressent — « j'ai visé
+   200 m à gauche du village » — et elle reste bien conditionnée, puisqu'elle
+   ne dépend que de l'axe horizontal de la vue, juste au pixel près.
+   Noter l'angle nu punissait deux fois un clic tardif : plus on est près du
+   point, plus le même écart au sol pèse en degrés. */
+const TOL_RECAL_M = 0.30 * NM;        // « reconnu » : moins de 550 m de côté
+const NUL_RECAL_M = 1.40 * NM;        // au-delà, score nul
+
 function finishRound(guess, revealed){
   const r = S.round;
   r.answered = true;
+  arreterVol();
   const secs = (Date.now() - r.t0) / 1000;
 
-  showMarker(mkTruth, true, r.truth);
+  /* En recalage, ce qu'il fallait trouver est le point de recalage, pas la
+     position de l'avion — qui, elle, est connue et avance. */
+  const cible = r.recal ? r.recal.pt : r.truth;
+  const tol   = r.recal ? TOL_RECAL_M : r.radiusM;
+
+  // En recalage le losange cyan marque déjà le point : une croix rouge au même
+  // endroit n'ajouterait rien.
+  showMarker(mkTruth, !r.recal, cible);
   mkHdg.setRotation(r.heading);            // orientee sur le cap suivi
   showMarker(mkHdg, true, r.truth);
 
-  let errM = null, score = 0, inside = false;
+  let errM = null, score = 0, inside = false, errDeg = null, ecartLat = null;
   if (guess && !revealed){
-    errM  = distance(guess, r.truth);
-    inside = errM <= r.radiusM;
-    score = Math.max(0, Math.round(100 * (1 - errM / r.radiusM)));
+    errM = distance(guess, cible);
+    if (r.recal){
+      errDeg   = Math.abs(((bearingTo(r.truth, guess) - bearingTo(r.truth, cible) + 540) % 360) - 180);
+      ecartLat = distance(r.truth, cible) * Math.sin(rad(errDeg));
+      inside = ecartLat <= TOL_RECAL_M;
+      score  = Math.max(0, Math.round(100 * (1 - ecartLat / NUL_RECAL_M)));
+      /* La précocité compte, mais elle ne doit pas écraser la justesse :
+         reconnaître le point au dernier moment ne coûte que 20 %. */
+      const reste = Math.max(0, r.recal.avance - r.recal.tMin) / r.recal.avance;
+      score = Math.round(score * (0.8 + 0.2 * reste));
+      // Réponse et cible restent affichées, carte et paysage.
+      showMarker(mkReponse, true, guess);
+      pointReponse = { lat:guess.lat, lon:guess.lon, masque:estMasque(guess.lat, guess.lon) };
+      pointCible   = { lat:cible.lat, lon:cible.lon, masque:estMasque(cible.lat, cible.lon) };
+    }else{
+      inside = errM <= tol;
+      score = Math.max(0, Math.round(100 * (1 - errM / tol)));
+    }
     chart.getSource('err').setData({
       type:'Feature', properties:{},
-      geometry:{ type:'LineString', coordinates:[[guess.lon, guess.lat], [r.truth.lon, r.truth.lat]] }
+      geometry:{ type:'LineString', coordinates:[[guess.lon, guess.lat], [cible.lon, cible.lat]] }
     });
   }
 
-  S.hist.push({ t:Date.now(), errM, score, radiusM:r.radiusM, secs, revealed:!!revealed });
+  S.hist.push({ t:Date.now(), errM, score, radiusM:tol, secs, revealed:!!revealed });
   saveHist();
 
   // --- débriefing ---
@@ -1997,18 +2442,29 @@ function finishRound(guess, revealed){
   db.classList.toggle('ok',  errM != null && inside);
   db.classList.toggle('bad', errM != null && !inside);
   if (errM == null){
-    dbErr.textContent = 'Réponse révélée';
+    dbErr.textContent = r.recal && !revealed ? 'Point manqué' : 'Réponse révélée';
     dbErr.style.fontSize = '20px';
-    dbV.textContent = '';
+    dbV.textContent = r.recal && !revealed ? 'Vous êtes passé au travers sans le désigner' : '';
+    if (r.recal && !revealed) db.classList.add('bad');
   }else{
     const nm = errM / NM;
     dbErr.style.fontSize = '27px';
     dbErr.textContent = nm.toFixed(2) + ' NM';
-    dbV.textContent = (inside ? '✓ dans le cercle' : '✗ hors du cercle') + ' · ' + score + '/100';
+    if (r.recal){
+      const restant = Math.max(0, r.recal.avance - r.recal.tMin);
+      dbErr.textContent = ecartLat < NM ? Math.round(ecartLat) + ' m'
+                                        : (ecartLat / NM).toFixed(2) + ' NM';
+      dbV.textContent = (inside ? '✓ point reconnu' : '✗ à côté')
+                      + ' · ' + score + '/100 · ' + errDeg.toFixed(1) + '° · à '
+                      + mmss(restant) + ' du point';
+    }else{
+      dbV.textContent = (inside ? '✓ dans le cercle' : '✗ hors du cercle') + ' · ' + score + '/100';
+    }
   }
 
   $('btnLayer').disabled = false;
   setMode('debrief');
+  majVise3D();          // les repères 3D ne s'affichent qu'en débriefing
   updateChips();
 }
 
@@ -2022,8 +2478,21 @@ function setMode(m){
   $('debrief').classList.toggle('show', db);
   if (!db) $('debrief').classList.remove('ok', 'bad');
   $('zoneBar').style.display = zone ? 'flex' : 'none';
-  $('incertitudeInfo').style.display = (play || db) ? 'block' : 'none';
+  /* Le cercle d'incertitude n'a pas de sens en recalage : la position est
+     connue et avance toute seule, ce qu'on cherche est un point du paysage. */
+  const sansCercle = S.set.mode === 'recalage';
+  $('incertitudeInfo').style.display = ((play || db) && !sansCercle) ? 'block' : 'none';
+  $('chipRad').hidden = sansCercle;
   $('btnValidate').disabled = !(play && S.round && S.round.guess);
+  const recal = S.set.mode === 'recalage';
+  const enVol = !!(S.round && S.round.recal && S.round.recal.enVol);
+  $('btnValidate').hidden     = recal;
+  $('btnDemarrerVol').hidden  = !(recal && play && !enVol);
+  $('consigneRecal').hidden   = !(recal && play && enVol);
+  $('answerBar').classList.toggle('colonne', recal && play);
+  $('vitesseBtn').hidden      = !(recal && play);
+  majVitesse();
+  if (!play) arreterVol();
   if (zone){ chart.setBearing(0); }
 }
 
@@ -2173,6 +2642,18 @@ function syncForm(){
         ? 'Source : étalonnage manuel sur cet appareil.'
         : 'Source : détection automatique — ' + det.source + '.');
   $('grpBranche').hidden   = S.set.mode !== 'branche';
+  $('grpRecalage').hidden  = S.set.mode !== 'recalage';
+  $('inRecalMin').value    = S.set.recalMin;
+  $('inRecalEcart').value  = S.set.recalEcart;
+  $('inRecalLeg').value    = S.set.recalLegMin;
+  const dansZone = pointsRecalage.length ? pointsRecalageDansZone().length : 0;
+  $('recalInfo').innerHTML = pointsRecalage.length
+    ? 'Base : <b>' + pointsRecalage.length + ' points</b> — '
+      + (dansZone ? '<b>' + dansZone + '</b> dans la zone de travail.'
+                  : '<b>aucun</b> dans la zone de travail. La base ne couvre encore que '
+                    + 'la région où l\'extraction a été faite.')
+    : 'Base vide : aucun point n\'a été publié dans ce fichier.';
+  $('rowZoneRecal').hidden = !(S.set.mode === 'recalage' && pointsRecalage.length && !dansZone);
   $('inSource').value  = S.set.source;
   $('inUrl').value     = S.set.urlTuiles;
   $('inUrlZ').value    = S.set.urlMaxZoom;
@@ -2217,6 +2698,9 @@ function onSettingChange(){
   S.set.legMin     = clamp(+$('inLegMin').value || 18, 6, 60);
   S.set.sweepMax   = clamp(+$('inSweep').value || 110, 20, 175);
   S.set.showCircle = $('inShowCircle').checked;
+  S.set.recalMin   = clamp(+$('inRecalMin').value || 2, 1, 6);
+  S.set.recalEcart = clamp(+$('inRecalEcart').value || 0, 0, 2);
+  S.set.recalLegMin = clamp(+$('inRecalLeg').value || 12, 4, 60);
 
   const fondAvant = JSON.stringify([S.set.source, S.set.urlTuiles, S.set.urlMaxZoom]);
   S.set.source     = $('inSource').value;
@@ -2249,7 +2733,8 @@ function onSettingChange(){
 }
 
 ['inZoneR','inGs','inTime','inRadius','inDirect','inCircleMode','inAlt','inHauteurRef','inSommetRayon','inFov','inHdg','inCenter',
- 'inSource','inUrl','inUrlZ','inMode','inLegMin','inSweep','inShowCircle','inPrecharge']
+ 'inSource','inUrl','inUrlZ','inMode','inLegMin','inSweep','inShowCircle','inPrecharge',
+ 'inRecalMin','inRecalEcart','inRecalLeg']
   .forEach(id => {
     const el = $(id);
     el.addEventListener('change', onSettingChange);
@@ -2349,11 +2834,35 @@ $('btnEchelle').onclick = () => {
   chart.easeTo({ zoom: zoomEchelleReelle(chart.getCenter().lat), duration:450 });
 };
 
-$('btnZoomTruth').onclick = () => {
-  if (!S.round) return;
-  chart.easeTo({ center:[S.round.truth.lon, S.round.truth.lat], zoom:13, duration:600 });
+/* Le vol attend le signal : on prend d'abord connaissance de la carte et du
+   point, ce qui laisse aussi au relief et à l'orthophoto le temps d'arriver. */
+$('btnDemarrerVol').onclick = () => {
+  const r = S.round;
+  if (!r || !r.recal || r.recal.enVol) return;
+  r.recal.enVol = true;
+  demarrerVol();
+  setMode('play');
 };
 
+$('btnVitesse').onclick = () => {
+  const i = ALLURES.indexOf(vitesseRecalage());
+  S.set.recalVitesse = ALLURES[(i + 1) % ALLURES.length];
+  saveSettings();
+  majVitesse();
+};
+
+$('btnZoneRecal').onclick = () => {
+  const e = emprisePointsRecalage();
+  if (!e) return;
+  S.set.zone = e.centre;
+  S.set.zoneR = clamp(e.rayonNM, 5, 150);
+  saveSettings(); syncForm(); updateChips();
+  toast('Zone placée sur la base : ' + e.rayonNM + ' NM autour de '
+      + e.centre.lat.toFixed(2) + ' ' + e.centre.lon.toFixed(2));
+  newRound();
+};
+
+chargerPointsRecalage();
 $('btnStart').onclick = () => { $('intro').style.display = 'none'; newRound(); };
 $('btnIntroZone').onclick = () => { enterZoneMode(); };
 
