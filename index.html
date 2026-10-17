@@ -2922,7 +2922,35 @@ $('btnZoneRecal').onclick = () => {
 };
 
 chargerPointsRecalage();
-$('btnStart').onclick = () => { $('intro').style.display = 'none'; newRound(); };
+$('btnStart').onclick = () => { $('intro').style.display = 'none'; lancerPremiereManche(); };
+
+/** « Commencer » doit toujours aboutir à une manche, comme « Nouvelle manche ».
+ *  On relance jusqu'à trois fois si la première tentative échoue (relief pas
+ *  encore prêt, erreur passagère), et en recalage on amène d'office la zone
+ *  sur la base de points si la zone enregistrée n'en contient aucun. */
+async function lancerPremiereManche(){
+  toast('Préparation de la manche…', 2500);
+  let ok = false;
+  for (let essai = 0; essai < 3 && !ok; essai++){
+    if (S.set.mode === 'recalage' && !pointsRecalageDansZone().length){
+      const e = emprisePointsRecalage();
+      if (e){
+        S.set.zone  = e.centre;
+        S.set.zoneR = clamp(e.rayonNM, 5, 150);
+        saveSettings(); syncForm();
+      }
+    }
+    try{
+      await newRound();
+      ok = !!S.round && S.mode === 'play';
+    }catch(err){
+      console.error('Lancement de la manche :', err);
+      $('btnNew').disabled = false;
+    }
+    if (!ok) await new Promise(r => setTimeout(r, 1500));
+  }
+  if (!ok) toast('La manche ne démarre pas : cliquez « Nouvelle manche ».', 4200);
+}
 $('btnIntroZone').onclick = () => { enterZoneMode(); };
 
 /* ---- séparateur redimensionnable ---- */
